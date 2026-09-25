@@ -28,89 +28,95 @@ const supabase =
       )
     : null;
 
+function cloneDefaults(): Content {
+  return JSON.parse(JSON.stringify(defaultContent)) as Content;
+}
+
 function mergeContent(data: any): Content {
+  const defaults = cloneDefaults();
+
   if (!data || typeof data !== 'object') {
-    return structuredClone(defaultContent);
+    return defaults;
   }
 
   return {
-    ...structuredClone(defaultContent),
+    ...defaults,
     ...data,
 
     site: {
-      ...defaultContent.site,
+      ...defaults.site,
       ...(data.site || {})
     },
 
     profile: {
-      ...defaultContent.profile,
+      ...defaults.profile,
       ...(data.profile || {}),
       goals: Array.isArray(data.profile?.goals)
         ? data.profile.goals
-        : defaultContent.profile.goals,
+        : defaults.profile.goals,
       why: Array.isArray(data.profile?.why)
         ? data.profile.why
-        : defaultContent.profile.why
+        : defaults.profile.why
     },
 
     about: {
-      ...defaultContent.about,
+      ...defaults.about,
       ...(data.about || {}),
       paragraphs: Array.isArray(data.about?.paragraphs)
         ? data.about.paragraphs
-        : defaultContent.about.paragraphs,
+        : defaults.about.paragraphs,
       stats: Array.isArray(data.about?.stats)
         ? data.about.stats
-        : defaultContent.about.stats
+        : defaults.about.stats
     },
 
     hobbies: Array.isArray(data.hobbies)
       ? data.hobbies
-      : defaultContent.hobbies,
+      : defaults.hobbies,
 
     habits: Array.isArray(data.habits)
       ? data.habits
-      : defaultContent.habits,
+      : defaults.habits,
 
     projects: Array.isArray(data.projects)
       ? data.projects
-      : defaultContent.projects,
+      : defaults.projects,
 
     plugins: Array.isArray(data.plugins)
       ? data.plugins
-      : defaultContent.plugins,
+      : defaults.plugins,
 
     cards: Array.isArray(data.cards)
       ? data.cards
-      : defaultContent.cards,
+      : defaults.cards,
 
     connections: Array.isArray(data.connections)
       ? data.connections
-      : defaultContent.connections,
+      : defaults.connections,
 
     staffing: Array.isArray(data.staffing)
       ? data.staffing
-      : defaultContent.staffing,
+      : defaults.staffing,
 
     cardsClosing:
       typeof data.cardsClosing === 'string'
         ? data.cardsClosing
-        : defaultContent.cardsClosing,
+        : defaults.cardsClosing,
 
     theme: {
-      ...defaultContent.theme,
+      ...defaults.theme,
       ...(data.theme || {})
     },
 
     nav: Array.isArray(data.nav)
       ? data.nav
-      : defaultContent.nav
+      : defaults.nav
   };
 }
 
 export default function Admin() {
-  const [content, setContent] = useState<Content>(
-    structuredClone(defaultContent)
+  const [content, setContent] = useState<Content>(() =>
+    cloneDefaults()
   );
 
   const [active, setActive] = useState('Site');
@@ -124,41 +130,64 @@ export default function Admin() {
     async function load() {
       if (!supabase) {
         if (mounted) {
-          setStatus('Supabase environment variables are missing.');
+          setStatus(
+            'Supabase environment variables are missing.'
+          );
           setChecking(false);
         }
+
         return;
       }
 
-      const {
-        data: sessionData,
-        error: sessionError
-      } = await supabase.auth.getSession();
+      try {
+        const {
+          data: sessionData,
+          error: sessionError
+        } = await supabase.auth.getSession();
 
-      if (sessionError || !sessionData.session) {
-        window.location.href = '/admin/login';
-        return;
+        if (sessionError || !sessionData.session) {
+          window.location.href = '/admin/login';
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('site_content')
+          .select('content')
+          .eq('id', 'main')
+          .maybeSingle();
+
+        if (!mounted) return;
+
+        if (error) {
+          setStatus(`Load failed: ${error.message}`);
+          setChecking(false);
+          return;
+        }
+
+        if (data?.content) {
+          const merged = mergeContent(data.content);
+
+          setContent(merged);
+          setRaw(JSON.stringify(merged, null, 2));
+        } else {
+          const fresh = cloneDefaults();
+
+          setContent(fresh);
+          setRaw(JSON.stringify(fresh, null, 2));
+        }
+
+        setChecking(false);
+      } catch (error: any) {
+        if (!mounted) return;
+
+        setStatus(
+          `Load failed: ${
+            error?.message || 'Unknown error'
+          }`
+        );
+
+        setChecking(false);
       }
-
-      const { data, error } = await supabase
-        .from('site_content')
-        .select('content')
-        .eq('id', 'main')
-        .maybeSingle();
-
-      if (!mounted) return;
-
-      if (!error && data?.content) {
-        const merged = mergeContent(data.content);
-        setContent(merged);
-        setRaw(JSON.stringify(merged, null, 2));
-      }
-
-      if (error) {
-        setStatus(`Load failed: ${error.message}`);
-      }
-
-      setChecking(false);
     }
 
     load();
@@ -168,24 +197,35 @@ export default function Admin() {
     };
   }, []);
 
-  function set(path: string, value: any) {
-    setContent((prev) => {
-      const next = structuredClone(prev) as any;
+  function updateContent(
+    path: string,
+    value: any
+  ) {
+    setContent((previous) => {
+      const next = JSON.parse(
+        JSON.stringify(previous)
+      ) as any;
+
       const parts = path.split('.');
 
-      let obj = next;
+      let target = next;
 
       for (let i = 0; i < parts.length - 1; i++) {
-        if (!obj[parts[i]] || typeof obj[parts[i]] !== 'object') {
-          obj[parts[i]] = {};
+        const key = parts[i];
+
+        if (
+          !target[key] ||
+          typeof target[key] !== 'object'
+        ) {
+          target[key] = {};
         }
 
-        obj = obj[parts[i]];
+        target = target[key];
       }
 
-      obj[parts[parts.length - 1]] = value;
+      target[parts[parts.length - 1]] = value;
 
-      return next;
+      return next as Content;
     });
   }
 
@@ -211,40 +251,58 @@ export default function Admin() {
         });
 
       if (saveError) {
-        setStatus(`Publish failed: ${saveError.message}`);
+        setStatus(
+          `Publish failed: ${saveError.message}`
+        );
         return;
       }
 
-      const { data: verifyData, error: verifyError } = await supabase
+      const {
+        data: verifyData,
+        error: verifyError
+      } = await supabase
         .from('site_content')
         .select('content, updated_at')
         .eq('id', 'main')
         .maybeSingle();
 
       if (verifyError) {
-        setStatus(`Saved, but verification failed: ${verifyError.message}`);
+        setStatus(
+          `Saved, but verification failed: ${verifyError.message}`
+        );
         return;
       }
 
       if (verifyData?.content) {
-        const verified = mergeContent(verifyData.content);
+        const verified = mergeContent(
+          verifyData.content
+        );
 
         setContent(verified);
         setRaw(JSON.stringify(verified, null, 2));
+      } else {
+        setRaw(JSON.stringify(content, null, 2));
       }
 
       setStatus('Published successfully.');
     } catch (error: any) {
-      setStatus(`Publish failed: ${error?.message || 'Unknown error'}`);
+      setStatus(
+        `Publish failed: ${
+          error?.message || 'Unknown error'
+        }`
+      );
     }
   }
 
   function resetToDefaults() {
-    const fresh = structuredClone(defaultContent);
+    const fresh = cloneDefaults();
 
     setContent(fresh);
     setRaw(JSON.stringify(fresh, null, 2));
-    setStatus('Reset locally. Click Publish to save.');
+
+    setStatus(
+      'Reset locally. Click Publish to save.'
+    );
   }
 
   function applyRawJSON() {
@@ -254,9 +312,16 @@ export default function Admin() {
 
       setContent(merged);
       setRaw(JSON.stringify(merged, null, 2));
-      setStatus('JSON applied locally. Click Publish to save.');
+
+      setStatus(
+        'JSON applied locally. Click Publish to save.'
+      );
     } catch (error: any) {
-      setStatus(`Invalid JSON: ${error?.message || 'Invalid JSON'}`);
+      setStatus(
+        `Invalid JSON: ${
+          error?.message || 'Invalid JSON'
+        }`
+      );
     }
   }
 
@@ -265,7 +330,11 @@ export default function Admin() {
       <main className="admin-page">
         <div className="admin-loading">
           <h1>LOADING ADMIN...</h1>
-          <p>Checking authentication and loading site content.</p>
+
+          <p>
+            Checking authentication and loading site
+            content.
+          </p>
         </div>
       </main>
     );
@@ -276,21 +345,35 @@ export default function Admin() {
       <div className="admin-shell">
         <header className="admin-header">
           <div>
-            <div className="admin-kicker">LIVINGYUJI / ADMIN</div>
+            <div className="admin-kicker">
+              LIVINGYUJI / ADMIN
+            </div>
+
             <h1>CONTROL PANEL</h1>
-            <p>Manage the content shown across the public website.</p>
+
+            <p>
+              Manage the content shown across the public
+              website.
+            </p>
           </div>
 
           <div className="admin-actions">
-            <a className="pixel-btn small-btn" href="/">
+            <a
+              className="pixel-btn small-btn"
+              href="/"
+            >
               VIEW SITE
             </a>
 
-            <a className="pixel-btn small-btn" href="/dashboard">
+            <a
+              className="pixel-btn small-btn"
+              href="/dashboard"
+            >
               DASHBOARD
             </a>
 
             <button
+              type="button"
               className="pixel-btn small-btn accent"
               onClick={save}
             >
@@ -301,13 +384,18 @@ export default function Admin() {
 
         <div className="admin-layout">
           <aside className="admin-sidebar">
-            <div className="admin-sidebar-title">SECTIONS</div>
+            <div className="admin-sidebar-title">
+              SECTIONS
+            </div>
 
             {sections.map((section) => (
               <button
+                type="button"
                 key={section}
                 className={`admin-nav-item ${
-                  active === section ? 'active' : ''
+                  active === section
+                    ? 'active'
+                    : ''
                 }`}
                 onClick={() => setActive(section)}
               >
@@ -316,6 +404,7 @@ export default function Admin() {
             ))}
 
             <button
+              type="button"
               className="admin-nav-item danger"
               onClick={resetToDefaults}
             >
@@ -335,43 +424,80 @@ export default function Admin() {
                 <Field
                   label="Brand"
                   value={content.site.brand}
-                  onChange={(v) => set('site.brand', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'site.brand',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Title"
                   value={content.site.title}
-                  onChange={(v) => set('site.title', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'site.title',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Kicker"
                   value={content.site.kicker}
-                  onChange={(v) => set('site.kicker', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'site.kicker',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Hero Title"
                   value={content.site.heroTitle}
-                  onChange={(v) => set('site.heroTitle', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'site.heroTitle',
+                      value
+                    )
+                  }
                 />
 
                 <TextArea
                   label="Hero Text"
                   value={content.site.heroText}
-                  onChange={(v) => set('site.heroText', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'site.heroText',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Dashboard Button"
-                  value={content.site.dashboardLabel}
-                  onChange={(v) => set('site.dashboardLabel', v)}
+                  value={
+                    content.site.dashboardLabel
+                  }
+                  onChange={(value) =>
+                    updateContent(
+                      'site.dashboardLabel',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Footer"
                   value={content.site.footer}
-                  onChange={(v) => set('site.footer', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'site.footer',
+                      value
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -381,49 +507,91 @@ export default function Admin() {
                 <Field
                   label="Name"
                   value={content.profile.name}
-                  onChange={(v) => set('profile.name', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'profile.name',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Age"
                   value={content.profile.age}
-                  onChange={(v) => set('profile.age', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'profile.age',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Place"
                   value={content.profile.place}
-                  onChange={(v) => set('profile.place', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'profile.place',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Class / Grade"
-                  value={content.profile.classGrade}
-                  onChange={(v) => set('profile.classGrade', v)}
+                  value={
+                    content.profile.classGrade
+                  }
+                  onChange={(value) =>
+                    updateContent(
+                      'profile.classGrade',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Role"
                   value={content.profile.role}
-                  onChange={(v) => set('profile.role', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'profile.role',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Profile Image URL"
                   value={content.profile.image}
-                  onChange={(v) => set('profile.image', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'profile.image',
+                      value
+                    )
+                  }
                 />
 
                 <ArrayEditor
                   label="Goals"
                   values={content.profile.goals}
-                  onChange={(v) => set('profile.goals', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'profile.goals',
+                      values
+                    )
+                  }
                 />
 
                 <ArrayEditor
                   label="Why"
                   values={content.profile.why}
-                  onChange={(v) => set('profile.why', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'profile.why',
+                      values
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -433,82 +601,121 @@ export default function Admin() {
                 <Field
                   label="Title"
                   value={content.about.title}
-                  onChange={(v) => set('about.title', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'about.title',
+                      value
+                    )
+                  }
                 />
 
                 <Field
                   label="Subtitle"
                   value={content.about.subtitle}
-                  onChange={(v) => set('about.subtitle', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'about.subtitle',
+                      value
+                    )
+                  }
                 />
 
                 <ArrayEditor
                   label="Paragraphs"
                   values={content.about.paragraphs}
-                  onChange={(v) => set('about.paragraphs', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'about.paragraphs',
+                      values
+                    )
+                  }
                 />
 
                 <div className="admin-field">
                   <label>Stats</label>
 
                   <div className="admin-list">
-                    {content.about.stats.map((stat, index) => (
-                      <div
-                        className="admin-row"
-                        key={`${stat.label}-${index}`}
-                      >
-                        <input
-                          value={stat.label}
-                          onChange={(e) => {
-                            const next = [...content.about.stats];
-                            next[index] = {
-                              ...next[index],
-                              label: e.target.value
-                            };
-                            set('about.stats', next);
-                          }}
-                        />
-
-                        <input
-                          value={stat.value}
-                          onChange={(e) => {
-                            const next = [...content.about.stats];
-                            next[index] = {
-                              ...next[index],
-                              value: e.target.value
-                            };
-                            set('about.stats', next);
-                          }}
-                        />
-
-                        <button
-                          className="pixel-btn small-btn danger-btn"
-                          onClick={() => {
-                            set(
-                              'about.stats',
-                              content.about.stats.filter(
-                                (_, i) => i !== index
-                              )
-                            );
-                          }}
+                    {content.about.stats.map(
+                      (stat, index) => (
+                        <div
+                          className="admin-row"
+                          key={`${stat.label}-${index}`}
                         >
-                          REMOVE
-                        </button>
-                      </div>
+                          <input
+                            value={stat.label}
+                            onChange={(event) => {
+                              const next = [
+                                ...content.about.stats
+                              ];
+
+                              next[index] = {
+                                ...next[index],
+                                label:
+                                  event.target.value
+                              };
+
+                              updateContent(
+                                'about.stats',
+                                next
+                              );
+                            }}
+                          />
+
+                          <input
+                            value={stat.value}
+                            onChange={(event) => {
+                              const next = [
+                                ...content.about.stats
+                              ];
+
+                              next[index] = {
+                                ...next[index],
+                                value:
+                                  event.target.value
+                              };
+
+                              updateContent(
+                                'about.stats',
+                                next
+                              );
+                            }}
+                          />
+
+                          <button
+                            type="button"
+                            className="pixel-btn small-btn danger-btn"
+                            onClick={() => {
+                              updateContent(
+                                'about.stats',
+                                content.about.stats.filter(
+                                  (_, i) =>
+                                    i !== index
+                                )
+                              );
+                            }}
+                          >
+                            REMOVE
+                          </button>
+                        </div>
+                      )
                     )}
                   </div>
 
                   <button
+                    type="button"
                     className="pixel-btn small-btn"
-                    onClick={() =>
-                      set('about.stats', [
-                        ...content.about.stats,
-                        {
-                          label: 'new',
-                          value: '0'
-                        }
-                      ])
-                    }
+                    onClick={() => {
+                      updateContent(
+                        'about.stats',
+                        [
+                          ...content.about.stats,
+                          {
+                            label: 'new',
+                            value: '0'
+                          }
+                        ]
+                      );
+                    }}
                   >
                     ADD STAT
                   </button>
@@ -521,7 +728,12 @@ export default function Admin() {
                 <ArrayEditor
                   label="Hobbies"
                   values={content.hobbies}
-                  onChange={(v) => set('hobbies', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'hobbies',
+                      values
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -531,7 +743,12 @@ export default function Admin() {
                 <ArrayEditor
                   label="Habits"
                   values={content.habits}
-                  onChange={(v) => set('habits', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'habits',
+                      values
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -541,7 +758,12 @@ export default function Admin() {
                 <ProjectEditor
                   title="Projects"
                   projects={content.projects}
-                  onChange={(v) => set('projects', v)}
+                  onChange={(projects) =>
+                    updateContent(
+                      'projects',
+                      projects
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -551,7 +773,12 @@ export default function Admin() {
                 <ProjectEditor
                   title="Services"
                   projects={content.plugins}
-                  onChange={(v) => set('plugins', v)}
+                  onChange={(projects) =>
+                    updateContent(
+                      'plugins',
+                      projects
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -561,7 +788,12 @@ export default function Admin() {
                 <ArrayEditor
                   label="Staffing"
                   values={content.staffing}
-                  onChange={(v) => set('staffing', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'staffing',
+                      values
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -571,13 +803,23 @@ export default function Admin() {
                 <ArrayEditor
                   label="Cards"
                   values={content.cards}
-                  onChange={(v) => set('cards', v)}
+                  onChange={(values) =>
+                    updateContent(
+                      'cards',
+                      values
+                    )
+                  }
                 />
 
                 <TextArea
                   label="Cards Closing"
                   value={content.cardsClosing}
-                  onChange={(v) => set('cardsClosing', v)}
+                  onChange={(value) =>
+                    updateContent(
+                      'cardsClosing',
+                      value
+                    )
+                  }
                 />
               </AdminPanel>
             )}
@@ -585,79 +827,108 @@ export default function Admin() {
             {active === 'Connections' && (
               <AdminPanel title="CONNECTIONS">
                 <div className="admin-list">
-                  {content.connections.map((connection, index) => (
-                    <div
-                      className="admin-card"
-                      key={`${connection.name}-${index}`}
-                    >
-                      <Field
-                        label="Name"
-                        value={connection.name}
-                        onChange={(v) => {
-                          const next = [...content.connections];
-                          next[index] = {
-                            ...next[index],
-                            name: v
-                          };
-                          set('connections', next);
-                        }}
-                      />
-
-                      <Field
-                        label="Handle"
-                        value={connection.handle}
-                        onChange={(v) => {
-                          const next = [...content.connections];
-                          next[index] = {
-                            ...next[index],
-                            handle: v
-                          };
-                          set('connections', next);
-                        }}
-                      />
-
-                      <Field
-                        label="URL"
-                        value={connection.url}
-                        onChange={(v) => {
-                          const next = [...content.connections];
-                          next[index] = {
-                            ...next[index],
-                            url: v
-                          };
-                          set('connections', next);
-                        }}
-                      />
-
-                      <button
-                        className="pixel-btn small-btn danger-btn"
-                        onClick={() => {
-                          set(
-                            'connections',
-                            content.connections.filter(
-                              (_, i) => i !== index
-                            )
-                          );
-                        }}
+                  {content.connections.map(
+                    (connection, index) => (
+                      <div
+                        className="admin-card"
+                        key={`${connection.name}-${index}`}
                       >
-                        REMOVE
-                      </button>
-                    </div>
+                        <Field
+                          label="Name"
+                          value={connection.name}
+                          onChange={(value) => {
+                            const next = [
+                              ...content.connections
+                            ];
+
+                            next[index] = {
+                              ...next[index],
+                              name: value
+                            };
+
+                            updateContent(
+                              'connections',
+                              next
+                            );
+                          }}
+                        />
+
+                        <Field
+                          label="Handle"
+                          value={connection.handle}
+                          onChange={(value) => {
+                            const next = [
+                              ...content.connections
+                            ];
+
+                            next[index] = {
+                              ...next[index],
+                              handle: value
+                            };
+
+                            updateContent(
+                              'connections',
+                              next
+                            );
+                          }}
+                        />
+
+                        <Field
+                          label="URL"
+                          value={connection.url}
+                          onChange={(value) => {
+                            const next = [
+                              ...content.connections
+                            ];
+
+                            next[index] = {
+                              ...next[index],
+                              url: value
+                            };
+
+                            updateContent(
+                              'connections',
+                              next
+                            );
+                          }}
+                        />
+
+                        <button
+                          type="button"
+                          className="pixel-btn small-btn danger-btn"
+                          onClick={() => {
+                            updateContent(
+                              'connections',
+                              content.connections.filter(
+                                (_, i) =>
+                                  i !== index
+                              )
+                            );
+                          }}
+                        >
+                          REMOVE
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
 
                 <button
+                  type="button"
                   className="pixel-btn small-btn"
-                  onClick={() =>
-                    set('connections', [
-                      ...content.connections,
-                      {
-                        name: 'New',
-                        handle: '@username',
-                        url: '#'
-                      }
-                    ])
-                  }
+                  onClick={() => {
+                    updateContent(
+                      'connections',
+                      [
+                        ...content.connections,
+                        {
+                          name: 'New',
+                          handle: '@username',
+                          url: '#'
+                        }
+                      ]
+                    );
+                  }}
                 >
                   ADD CONNECTION
                 </button>
@@ -666,12 +937,19 @@ export default function Admin() {
 
             {active === 'Theme' && (
               <AdminPanel title="THEME">
-                {Object.entries(content.theme).map(([key, value]) => (
+                {Object.entries(
+                  content.theme
+                ).map(([key, value]) => (
                   <Field
                     key={key}
                     label={key}
                     value={String(value)}
-                    onChange={(v) => set(`theme.${key}`, v)}
+                    onChange={(newValue) =>
+                      updateContent(
+                        `theme.${key}`,
+                        newValue
+                      )
+                    }
                   />
                 ))}
               </AdminPanel>
@@ -681,13 +959,21 @@ export default function Admin() {
               <AdminPanel title="ADVANCED JSON">
                 <TextArea
                   label="Full Site Content JSON"
-                  value={raw || JSON.stringify(content, null, 2)}
+                  value={
+                    raw ||
+                    JSON.stringify(
+                      content,
+                      null,
+                      2
+                    )
+                  }
                   onChange={setRaw}
                   rows={28}
                 />
 
                 <div className="admin-actions">
                   <button
+                    type="button"
                     className="pixel-btn small-btn"
                     onClick={applyRawJSON}
                   >
@@ -695,6 +981,7 @@ export default function Admin() {
                   </button>
 
                   <button
+                    type="button"
                     className="pixel-btn small-btn accent"
                     onClick={save}
                   >
@@ -706,13 +993,17 @@ export default function Admin() {
 
             <div className="admin-bottom-actions">
               <button
+                type="button"
                 className="pixel-btn accent"
                 onClick={save}
               >
                 PUBLISH CHANGES
               </button>
 
-              <a className="pixel-btn" href="/">
+              <a
+                className="pixel-btn"
+                href="/"
+              >
                 BACK TO SITE
               </a>
             </div>
@@ -759,7 +1050,9 @@ function Field({
 
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
       />
     </div>
   );
@@ -782,7 +1075,9 @@ function TextArea({
 
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
         rows={rows}
       />
     </div>
@@ -804,20 +1099,31 @@ function ArrayEditor({
 
       <div className="admin-list">
         {values.map((value, index) => (
-          <div className="admin-row" key={`${value}-${index}`}>
+          <div
+            className="admin-row"
+            key={`${value}-${index}`}
+          >
             <input
               value={value}
-              onChange={(e) => {
+              onChange={(event) => {
                 const next = [...values];
-                next[index] = e.target.value;
+
+                next[index] =
+                  event.target.value;
+
                 onChange(next);
               }}
             />
 
             <button
+              type="button"
               className="pixel-btn small-btn danger-btn"
               onClick={() =>
-                onChange(values.filter((_, i) => i !== index))
+                onChange(
+                  values.filter(
+                    (_, i) => i !== index
+                  )
+                )
               }
             >
               REMOVE
@@ -827,8 +1133,14 @@ function ArrayEditor({
       </div>
 
       <button
+        type="button"
         className="pixel-btn small-btn"
-        onClick={() => onChange([...values, 'New item'])}
+        onClick={() =>
+          onChange([
+            ...values,
+            'New item'
+          ])
+        }
       >
         ADD ITEM
       </button>
@@ -843,127 +1155,164 @@ function ProjectEditor({
 }: {
   title: string;
   projects: Content['projects'];
-  onChange: (projects: Content['projects']) => void;
+  onChange: (
+    projects: Content['projects']
+  ) => void;
 }) {
   return (
     <div className="admin-field">
       <label>{title}</label>
 
       <div className="admin-list">
-        {projects.map((project, index) => (
-          <div
-            className="admin-card"
-            key={`${project.id}-${index}`}
-          >
-            <Field
-              label="ID"
-              value={project.id}
-              onChange={(v) => {
-                const next = [...projects];
-                next[index] = {
-                  ...next[index],
-                  id: v
-                };
-                onChange(next);
-              }}
-            />
+        {projects.map(
+          (project, index) => (
+            <div
+              className="admin-card"
+              key={`${project.id}-${index}`}
+            >
+              <Field
+                label="ID"
+                value={project.id}
+                onChange={(value) => {
+                  const next = [
+                    ...projects
+                  ];
 
-            <Field
-              label="Name"
-              value={project.name}
-              onChange={(v) => {
-                const next = [...projects];
-                next[index] = {
-                  ...next[index],
-                  name: v
-                };
-                onChange(next);
-              }}
-            />
+                  next[index] = {
+                    ...next[index],
+                    id: value
+                  };
 
-            <TextArea
-              label="Description"
-              value={project.description}
-              onChange={(v) => {
-                const next = [...projects];
-                next[index] = {
-                  ...next[index],
-                  description: v
-                };
-                onChange(next);
-              }}
-              rows={4}
-            />
+                  onChange(next);
+                }}
+              />
 
-            <Field
-              label="Tags"
-              value={project.tags.join(', ')}
-              onChange={(v) => {
-                const next = [...projects];
+              <Field
+                label="Name"
+                value={project.name}
+                onChange={(value) => {
+                  const next = [
+                    ...projects
+                  ];
 
-                next[index] = {
-                  ...next[index],
-                  tags: v
-                    .split(',')
-                    .map((tag) => tag.trim())
-                    .filter(Boolean)
-                };
+                  next[index] = {
+                    ...next[index],
+                    name: value
+                  };
 
-                onChange(next);
-              }}
-            />
+                  onChange(next);
+                }}
+              />
 
-            <Field
-              label="URL"
-              value={project.url}
-              onChange={(v) => {
-                const next = [...projects];
-
-                next[index] = {
-                  ...next[index],
-                  url: v
-                };
-
-                onChange(next);
-              }}
-            />
-
-            <div className="admin-row">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={Boolean(project.private)}
-                  onChange={(e) => {
-                    const next = [...projects];
-
-                    next[index] = {
-                      ...next[index],
-                      private: e.target.checked
-                    };
-
-                    onChange(next);
-                  }}
-                />
-
-                PRIVATE
-              </label>
-
-              <button
-                className="pixel-btn small-btn danger-btn"
-                onClick={() =>
-                  onChange(
-                    projects.filter((_, i) => i !== index)
-                  )
+              <TextArea
+                label="Description"
+                value={
+                  project.description
                 }
-              >
-                REMOVE
-              </button>
+                onChange={(value) => {
+                  const next = [
+                    ...projects
+                  ];
+
+                  next[index] = {
+                    ...next[index],
+                    description: value
+                  };
+
+                  onChange(next);
+                }}
+                rows={4}
+              />
+
+              <Field
+                label="Tags"
+                value={project.tags.join(
+                  ', '
+                )}
+                onChange={(value) => {
+                  const next = [
+                    ...projects
+                  ];
+
+                  next[index] = {
+                    ...next[index],
+                    tags: value
+                      .split(',')
+                      .map((tag) =>
+                        tag.trim()
+                      )
+                      .filter(Boolean)
+                  };
+
+                  onChange(next);
+                }}
+              />
+
+              <Field
+                label="URL"
+                value={project.url}
+                onChange={(value) => {
+                  const next = [
+                    ...projects
+                  ];
+
+                  next[index] = {
+                    ...next[index],
+                    url: value
+                  };
+
+                  onChange(next);
+                }}
+              />
+
+              <div className="admin-row">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(
+                      project.private
+                    )}
+                    onChange={(event) => {
+                      const next = [
+                        ...projects
+                      ];
+
+                      next[index] = {
+                        ...next[index],
+                        private:
+                          event.target
+                            .checked
+                      };
+
+                      onChange(next);
+                    }}
+                  />
+
+                  PRIVATE
+                </label>
+
+                <button
+                  type="button"
+                  className="pixel-btn small-btn danger-btn"
+                  onClick={() =>
+                    onChange(
+                      projects.filter(
+                        (_, i) =>
+                          i !== index
+                      )
+                    )
+                  }
+                >
+                  REMOVE
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        )}
       </div>
 
       <button
+        type="button"
         className="pixel-btn small-btn"
         onClick={() =>
           onChange([
@@ -971,7 +1320,8 @@ function ProjectEditor({
             {
               id: `new-${Date.now()}`,
               name: 'NEW PROJECT',
-              description: 'Project description',
+              description:
+                'Project description',
               tags: ['New'],
               url: '#',
               private: false
