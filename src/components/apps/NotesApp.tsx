@@ -198,17 +198,18 @@ export function NotesApp() {
   const filteredNotes = useMemo(() => {
     return notes
       .filter((n) => {
+        const q = search.toLowerCase();
         const matchesSearch =
           !search.trim() ||
-          n.title.toLowerCase().includes(search.toLowerCase()) ||
-          n.content.toLowerCase().includes(search.toLowerCase());
-        const matchesTag = !selectedTag || n.tags?.includes(selectedTag);
+          (n.title || '').toLowerCase().includes(q) ||
+          (n.content || '').toLowerCase().includes(q);
+        const matchesTag = !selectedTag || (Array.isArray(n.tags) && n.tags.includes(selectedTag));
         return matchesSearch && matchesTag;
       })
       .sort((a, b) => {
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
-        return b.updatedAt - a.updatedAt;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
       });
   }, [notes, search, selectedTag]);
 

@@ -62,12 +62,24 @@ export function ShowcaseApp() {
         if (data && data.success && Array.isArray(data.projects) && data.projects.length > 0) {
           const mapped = data.projects.map((p: any) => ({
             ...p,
+            title: p.title || p.name || 'Untitled Project',
+            summary: p.summary || p.short_description || (p.description ? p.description.slice(0, 100) : '') || '',
+            description: p.description || '',
+            status: p.status || 'Active',
             category: p.category_id || p.category || 'web-apps',
             categoryName: p.category_name || (p.category_id === 'mc-plugins' ? 'Minecraft Plugins' : 'Websites & Web Apps'),
             gradientBg: p.gradient_bg || p.gradientBg || 'from-blue-600 to-indigo-900',
             iconSymbol: p.icon_symbol || p.iconSymbol || '⚡',
             isFree: p.is_free !== undefined ? p.is_free : true,
             price: Number(p.price) || 0,
+            technologies: Array.isArray(p.technologies) ? p.technologies : [],
+            links: p.links || {
+              github: p.github_url || '',
+              liveUrl: p.live_url || '',
+              downloadUrl: p.download_url || '',
+            },
+            createdAt: p.createdAt || p.created_at || new Date().toISOString(),
+            updatedAt: p.updatedAt || p.updated_at || p.createdAt || p.created_at || new Date().toISOString(),
           }));
           useShowcaseStore.setState({ projects: mapped });
         }
@@ -110,27 +122,36 @@ export function ShowcaseApp() {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return (
-          p.title.toLowerCase().includes(q) ||
-          p.summary.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q) ||
-          p.categoryName.toLowerCase().includes(q) ||
-          p.technologies.some((t) => t.toLowerCase().includes(q)) ||
-          (p.compatibility?.mcVersions && p.compatibility.mcVersions.some((v) => v.toLowerCase().includes(q)))
+          (p.title || '').toLowerCase().includes(q) ||
+          (p.summary || '').toLowerCase().includes(q) ||
+          (p.description || '').toLowerCase().includes(q) ||
+          (p.categoryName || '').toLowerCase().includes(q) ||
+          (Array.isArray(p.technologies) && p.technologies.some((t: string) => (t || '').toLowerCase().includes(q))) ||
+          (p.compatibility?.mcVersions && Array.isArray(p.compatibility.mcVersions) && p.compatibility.mcVersions.some((v: string) => (v || '').toLowerCase().includes(q)))
         );
       })
       .sort((a, b) => {
+        const aUpdated = a.updatedAt || a.createdAt || '';
+        const bUpdated = b.updatedAt || b.createdAt || '';
+        const aCreated = a.createdAt || '';
+        const bCreated = b.createdAt || '';
+        const aTitle = a.title || '';
+        const bTitle = b.title || '';
+        const aStatus = a.status || '';
+        const bStatus = b.status || '';
+
         if (sortBy === 'featured') {
           if (a.featured !== b.featured) return a.featured ? -1 : 1;
-          return b.updatedAt.localeCompare(a.updatedAt);
+          return bUpdated.localeCompare(aUpdated);
         }
         if (sortBy === 'newest') {
-          return b.createdAt.localeCompare(a.createdAt);
+          return bCreated.localeCompare(aCreated);
         }
         if (sortBy === 'name') {
-          return a.title.localeCompare(b.title);
+          return aTitle.localeCompare(bTitle);
         }
         if (sortBy === 'status') {
-          return a.status.localeCompare(b.status);
+          return aStatus.localeCompare(bStatus);
         }
         return 0;
       });
@@ -143,7 +164,7 @@ export function ShowcaseApp() {
 
   // Handle Free Download
   const handleDownload = (project: ShowcaseProject) => {
-    if (project.links.downloadUrl) {
+    if (project.links?.downloadUrl) {
       const a = document.createElement('a');
       a.href = project.links.downloadUrl;
       a.download = `${project.slug}-${project.version || 'v1.0'}.zip`;

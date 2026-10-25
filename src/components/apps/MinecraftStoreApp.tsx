@@ -72,6 +72,7 @@ export interface MinecraftProduct {
   iconBg: string;
   iconSymbol: string;
   downloadUrl?: string;
+  createdAt?: string;
   updatedAt: string;
 }
 
@@ -400,6 +401,7 @@ export function MinecraftStoreApp() {
             iconBg: p.icon_bg || p.iconBg || 'from-blue-600 to-indigo-900',
             iconSymbol: p.icon_symbol || p.iconSymbol || '⚡',
             downloadUrl: p.download_url || p.downloadUrl,
+            createdAt: p.created_at || p.createdAt || p.updated_at || p.updatedAt || '2026-10-25',
             updatedAt: p.updated_at || p.updatedAt || '2026-10-25',
           }));
           setProducts(mapped);
@@ -466,24 +468,28 @@ export function MinecraftStoreApp() {
       })
       .filter((p) => {
         if (filterVersion === 'all') return true;
-        return p.mcVersions.includes(filterVersion);
+        return Array.isArray(p.mcVersions) && p.mcVersions.includes(filterVersion);
       })
       .filter((p) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return (
-          p.name.toLowerCase().includes(q) ||
-          p.shortDesc.toLowerCase().includes(q) ||
-          p.creator.toLowerCase().includes(q) ||
-          p.categoryName.toLowerCase().includes(q)
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.shortDesc || '').toLowerCase().includes(q) ||
+          (p.creator || '').toLowerCase().includes(q) ||
+          (p.categoryName || '').toLowerCase().includes(q)
         );
       })
       .sort((a, b) => {
         if (sortBy === 'featured') return (b.featured ? 1 : 0) - (a.featured ? 1 : 0);
-        if (sortBy === 'newest') return b.updatedAt.localeCompare(a.updatedAt);
-        if (sortBy === 'price-asc') return a.price - b.price;
-        if (sortBy === 'price-desc') return b.price - a.price;
-        if (sortBy === 'name') return a.name.localeCompare(b.name);
+        if (sortBy === 'newest') {
+          const aTime = a.updatedAt || a.createdAt || '';
+          const bTime = b.updatedAt || b.createdAt || '';
+          return bTime.localeCompare(aTime);
+        }
+        if (sortBy === 'price-asc') return (a.price || 0) - (b.price || 0);
+        if (sortBy === 'price-desc') return (b.price || 0) - (a.price || 0);
+        if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
         return 0;
       });
   }, [products, selectedCategory, filterPrice, filterVersion, searchQuery, sortBy]);

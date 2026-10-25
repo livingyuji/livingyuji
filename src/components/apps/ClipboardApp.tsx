@@ -101,11 +101,11 @@ export function ClipboardApp() {
   const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
 
   const filteredItems = items
-    .filter((i) => !search.trim() || i.text.toLowerCase().includes(search.toLowerCase()))
+    .filter((i) => !search.trim() || (i.text || '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
-      return b.copiedAt - a.copiedAt;
+      return (b.copiedAt || 0) - (a.copiedAt || 0);
     });
 
   const handleCopy = async (item: ClipboardItem) => {

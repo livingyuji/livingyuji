@@ -328,7 +328,7 @@ export function CalendarApp() {
             <div className="flex-1 overflow-y-auto space-y-2.5 p-2 window-scroll">
               {events
                 .slice()
-                .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+                .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.startTime || '').localeCompare(b.startTime || ''))
                 .map((evt) => (
                   <div
                     key={evt.id}
