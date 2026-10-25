@@ -22,7 +22,11 @@ export default async function AdminDashboardPage() {
         const supabase = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
         const { data, error } = await supabase.auth.getUser(supabaseToken);
         if (!error && data.user) {
-          isAuthorized = true;
+          const userRole = data.user.app_metadata?.role || data.user.user_metadata?.role;
+          const adminEmail = process.env.ADMIN_EMAIL;
+          if (userRole === 'admin' || (adminEmail && data.user.email === adminEmail)) {
+            isAuthorized = true;
+          }
         }
       } catch {
         isAuthorized = false;

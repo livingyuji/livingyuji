@@ -151,7 +151,12 @@ export async function isAuthenticatedAdmin(req: NextRequest | Request): Promise<
         const supabase = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
         const { data, error } = await supabase.auth.getUser(supabaseToken);
         if (!error && data.user) {
-          return true;
+          // Strict verification: Require admin role or configured admin email
+          const userRole = data.user.app_metadata?.role || data.user.user_metadata?.role;
+          const adminEmail = process.env.ADMIN_EMAIL;
+          if (userRole === 'admin' || (adminEmail && data.user.email === adminEmail)) {
+            return true;
+          }
         }
       } catch {
         // Fall through

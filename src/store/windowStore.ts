@@ -166,7 +166,7 @@ export const APP_CONFIGS: Record<AppId, { title: string; defaultWidth: number; d
 
 const DEFAULT_SETTINGS: OSSettings = {
   wallpaper: 'matrix',
-  wallpaperType: 'image',
+  wallpaperType: 'preset',
   videoWallpaperSource: null,
   theme: 'dark',
   accentColor: '#1686DC',
@@ -181,7 +181,7 @@ const DEFAULT_SETTINGS: OSSettings = {
   siteTitle: 'LivingYuji OS — Windows-Inspired Web Operating System & Portfolio',
   customLogoUrl: '/avatar.png',
   customFaviconUrl: '/favicon.png',
-  customWallpaperUrl: 'https://in.pinterest.com/pin/759208449671054524/',
+  customWallpaperUrl: null,
   customVideoWallpaperUrl: null,
   videoWallpaperMuted: true,
   wallpaperMode: 'cover',
@@ -402,6 +402,9 @@ export const useWindowStore = create<WindowStore>()(
         if (settings.customVideoWallpaperUrl && settings.customVideoWallpaperUrl.startsWith('blob:')) {
           settings.customVideoWallpaperUrl = 'local:lyos_video_wallpaper_blob';
           settings.videoWallpaperSource = 'local';
+        }
+        if (settings.customWallpaperUrl && settings.customWallpaperUrl.startsWith('blob:')) {
+          settings.customWallpaperUrl = 'local:lyos_image_wallpaper_blob';
         }
         return {
           settings,

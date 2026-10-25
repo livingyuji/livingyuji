@@ -1,10 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useWindowStore, Wallpaper } from '@/store/windowStore';
 import { useFileSystemStore } from '@/store/fileSystemStore';
 import { useDesktopIconStore } from '@/store/desktopIconStore';
-import { saveVideoWallpaperBlob, clearVideoWallpaperBlob } from '@/lib/storage/wallpaperStorage';
+import {
+  saveVideoWallpaperBlob,
+  clearVideoWallpaperBlob,
+  saveImageWallpaperBlob,
+  clearImageWallpaperBlob,
+  resolveWallpaperMediaUrl,
+} from '@/lib/storage/wallpaperStorage';
 import {
   Laptop,
   Palette,
@@ -43,6 +49,28 @@ export function SettingsApp() {
   const [volume, setVolume] = useState<number>(70);
   const [is24Hour, setIs24Hour] = useState<boolean>(false);
   const [videoUrlInput, setVideoUrlInput] = useState<string>(settings.customVideoWallpaperUrl || '');
+  const [resolvedPreviewVideoUrl, setResolvedPreviewVideoUrl] = useState<string | null>(null);
+  const [resolvedPreviewImageUrl, setResolvedPreviewImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    resolveWallpaperMediaUrl(settings.customVideoWallpaperUrl, 'video').then((url) => {
+      if (!isCancelled) setResolvedPreviewVideoUrl(url);
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [settings.customVideoWallpaperUrl]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    resolveWallpaperMediaUrl(settings.customWallpaperUrl, 'image').then((url) => {
+      if (!isCancelled) setResolvedPreviewImageUrl(url);
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [settings.customWallpaperUrl]);
 
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -65,19 +93,23 @@ export function SettingsApp() {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        updateSettings({
-          wallpaperType: 'image',
-          customWallpaperUrl: reader.result,
-        });
-      }
-    };
-    reader.readAsDataURL(file);
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload a valid image file (PNG, JPG, WebP).');
+      return;
+    }
+    try {
+      const blobUrl = await saveImageWallpaperBlob(file);
+      updateSettings({
+        wallpaperType: 'image',
+        customWallpaperUrl: blobUrl,
+      });
+    } catch (err) {
+      console.error('Failed to save image wallpaper:', err);
+      alert('Failed to store image wallpaper.');
+    }
   };
 
   const wallpapers: { id: Wallpaper; label: string; desc: string; preview: string }[] = [
@@ -356,12 +388,13 @@ export function SettingsApp() {
               {settings.customVideoWallpaperUrl && (
                 <div className="w-full h-32 rounded-xl overflow-hidden bg-black/60 border border-white/10 relative">
                   <video
+                    key={resolvedPreviewVideoUrl || 'loading-video'}
                     autoPlay
                     loop
                     muted={settings.videoWallpaperMuted !== false}
                     playsInline
                     className="w-full h-full object-cover"
-                    src={settings.customVideoWallpaperUrl}
+                    src={resolvedPreviewVideoUrl || undefined}
                   />
                   <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[10px] text-white font-mono flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -510,12 +543,13 @@ export function SettingsApp() {
                     )}
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={async () => {
+                        await clearImageWallpaperBlob();
                         updateSettings({
                           wallpaperType: 'preset',
                           customWallpaperUrl: null,
-                        })
-                      }
+                        });
+                      }}
                       className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"
                     >
                       <Trash2 size={12} />

@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Heart, Clock, Home, Library, MoreHorizontal, Shuffle, Repeat } from 'lucide-react';
 
+import { resolveMusicMediaUrl } from '@/lib/storage/musicStorage';
+
 interface Track {
   id: string;
   number: number;
@@ -12,6 +14,9 @@ interface Track {
   duration: string;
   durationSec: number;
   coverGradient: string;
+  audioUrl?: string;
+  coverUrl?: string;
+  genre?: string;
 }
 
 interface Album {
@@ -86,6 +91,7 @@ const ALBUMS: Album[] = [
 ];
 
 export function MusicLabApp() {
+  const [albums, setAlbums] = useState<Album[]>(ALBUMS);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('christmas-2025');
   const [currentTrack, setCurrentTrack] = useState<Track>(ALBUMS[0].tracks[0]);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -95,12 +101,54 @@ export function MusicLabApp() {
   const [likedTrackIds, setLikedTrackIds] = useState<Set<string>>(new Set(['c1', 'c3', 'f1']));
   const [isAlbumLiked, setIsAlbumLiked] = useState<boolean>(true);
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
+  const [usingRealAudio, setUsingRealAudio] = useState<boolean>(false);
 
-  const selectedAlbum = ALBUMS.find((a) => a.id === selectedAlbumId) || ALBUMS[0];
+  const selectedAlbum = albums.find((a) => a.id === selectedAlbumId) || albums[0];
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
-  // Web Audio Synth for ambient playback
+  // Hydrate custom/uploaded music library from API
+  useEffect(() => {
+    fetch('/api/admin/music')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
+          const cloudTracks: Track[] = data.tracks.map((t: any, idx: number) => ({
+            id: t.id,
+            number: idx + 1,
+            title: t.title,
+            artist: t.artist || 'LivingYuji',
+            album: t.album || 'LivingYuji Releases',
+            duration: t.duration || '3:00',
+            durationSec: t.duration_sec || 180,
+            coverGradient: t.cover_gradient || 'from-indigo-600 to-purple-800',
+            audioUrl: t.audio_url,
+            coverUrl: t.cover_url,
+            genre: t.genre || 'Cyber Lo-Fi',
+          }));
+
+          // Group into a dedicated Library album
+          const libraryAlbum: Album = {
+            id: 'library-releases',
+            title: 'Master Audio Library',
+            type: 'Catalog',
+            releaseYear: '2026',
+            songsCount: cloudTracks.length,
+            totalTime: `${Math.round(cloudTracks.reduce((acc, c) => acc + c.durationSec, 0) / 60)} min`,
+            description: 'Curated and admin-managed original digital audio tracks, ambient soundscapes, and OSTs.',
+            coverGradient: 'from-blue-900 via-indigo-950 to-slate-950',
+            accentColor: '#38BDF8',
+            tracks: cloudTracks,
+          };
+
+          setAlbums([libraryAlbum, ...ALBUMS]);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Web Audio Synth for ambient playback fallback
   const startSynth = () => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -153,22 +201,53 @@ export function MusicLabApp() {
   };
 
   const togglePlay = () => {
+    const audio = audioElementRef.current;
     if (isPlaying) {
+      if (usingRealAudio && audio) {
+        audio.pause();
+      }
       stopSynth();
       setIsPlaying(false);
     } else {
-      startSynth();
+      if (usingRealAudio && audio) {
+        audio.play().catch(() => startSynth());
+      } else {
+        startSynth();
+      }
       setIsPlaying(true);
     }
   };
 
-  const playTrack = (track: Track) => {
+  const playTrack = async (track: Track) => {
     setCurrentTrack(track);
     setCurrentTime(0);
-    if (!isPlaying) {
-      startSynth();
-      setIsPlaying(true);
+    stopSynth();
+
+    const audio = audioElementRef.current;
+    if (track.audioUrl) {
+      try {
+        const resolved = await resolveMusicMediaUrl(track.audioUrl, track.id, 'audio');
+        if (resolved && audio) {
+          audio.src = resolved;
+          audio.volume = isMuted ? 0 : volume;
+          await audio.play();
+          setUsingRealAudio(true);
+          setIsPlaying(true);
+          return;
+        }
+      } catch (err) {
+        console.warn('Real audio playback failed, falling back to ambient synth:', err);
+      }
     }
+
+    // Fallback to ambient Web Audio synth
+    if (audio) {
+      audio.pause();
+      audio.src = '';
+    }
+    setUsingRealAudio(false);
+    startSynth();
+    setIsPlaying(true);
   };
 
   const playAlbum = (album: Album) => {
@@ -202,7 +281,7 @@ export function MusicLabApp() {
 
   useEffect(() => {
     let timer: any;
-    if (isPlaying) {
+    if (isPlaying && !usingRealAudio) {
       timer = setInterval(() => {
         setCurrentTime((prev) => {
           if (prev >= currentTrack.durationSec) {
@@ -214,10 +293,22 @@ export function MusicLabApp() {
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isPlaying, currentTrack]);
+  }, [isPlaying, usingRealAudio, currentTrack]);
 
   useEffect(() => {
-    return () => stopSynth();
+    if (audioElementRef.current) {
+      audioElementRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [volume, isMuted]);
+
+  useEffect(() => {
+    return () => {
+      stopSynth();
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current.src = '';
+      }
+    };
   }, []);
 
   const formatSecs = (secs: number) => {
@@ -228,6 +319,16 @@ export function MusicLabApp() {
 
   return (
     <div className="h-full flex flex-col bg-[#121212] text-white select-none overflow-hidden font-sans">
+      <audio
+        ref={audioElementRef}
+        onTimeUpdate={() => {
+          if (audioElementRef.current) {
+            setCurrentTime(Math.floor(audioElementRef.current.currentTime));
+          }
+        }}
+        onEnded={handleNextTrack}
+        className="hidden"
+      />
       {/* Upper Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Dark Sidebar (Spotify style) */}

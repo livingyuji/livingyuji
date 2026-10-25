@@ -9,6 +9,18 @@ import {
   getClientIp,
 } from '@/lib/auth/adminAuth';
 
+function sanitizeReturnTo(url: string | null | undefined): string {
+  if (!url || typeof url !== 'string') return '/admin/dashboard';
+  const trimmed = url.trim();
+  // Disallow absolute protocol schemes and protocol-relative URLs (//)
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return '/admin/dashboard';
+}
+
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
 
@@ -35,7 +47,7 @@ export async function POST(req: NextRequest) {
       passphrase = body.passphrase?.toString() || '';
       email = body.email?.toString().trim() || '';
       password = body.password?.toString() || '';
-      if (body.returnTo) returnTo = body.returnTo.toString();
+      if (body.returnTo) returnTo = sanitizeReturnTo(body.returnTo.toString());
     } catch {
       return NextResponse.json({ success: false, error: 'Invalid request payload.' }, { status: 400 });
     }
@@ -46,7 +58,7 @@ export async function POST(req: NextRequest) {
       email = formData.get('email')?.toString().trim() || '';
       password = formData.get('password')?.toString() || '';
       const r = formData.get('returnTo')?.toString();
-      if (r && r.startsWith('/')) returnTo = r;
+      if (r) returnTo = sanitizeReturnTo(r);
     } catch {
       return NextResponse.redirect(new URL('/admin?error=invalid_payload', req.url));
     }

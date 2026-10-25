@@ -2,7 +2,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useWindowStore } from '@/store/windowStore';
-import { loadVideoWallpaperBlob, getActiveVideoBlobUrl } from '@/lib/storage/wallpaperStorage';
+import {
+  loadVideoWallpaperBlob,
+  getActiveVideoBlobUrl,
+  getActiveImageBlobUrl,
+  resolveWallpaperMediaUrl,
+} from '@/lib/storage/wallpaperStorage';
 
 export function MatrixWallpaper() {
   const { settings } = useWindowStore();
@@ -16,6 +21,13 @@ export function MatrixWallpaper() {
       return raw;
     }
     return getActiveVideoBlobUrl();
+  });
+  const [resolvedImageUrl, setResolvedImageUrl] = useState<string | null>(() => {
+    const raw = settings.customWallpaperUrl;
+    if (raw && !raw.startsWith('local:') && !raw.startsWith('blob:')) {
+      return raw;
+    }
+    return getActiveImageBlobUrl();
   });
   const [isVideoError, setIsVideoError] = useState(false);
 
@@ -60,6 +72,21 @@ export function MatrixWallpaper() {
       isCancelled = true;
     };
   }, [isVideoMode, settings.customVideoWallpaperUrl, settings.videoWallpaperSource]);
+
+  // Load / Re-hydrate local image wallpaper from IndexedDB if necessary
+  useEffect(() => {
+    if (!settings.customWallpaperUrl) {
+      setResolvedImageUrl(null);
+      return;
+    }
+    let isCancelled = false;
+    resolveWallpaperMediaUrl(settings.customWallpaperUrl, 'image').then((url) => {
+      if (!isCancelled) setResolvedImageUrl(url);
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [settings.customWallpaperUrl]);
 
   // Robust HTML5 video autoplay & mute synchronization
   const isMuted = settings.videoWallpaperMuted !== false;
@@ -160,10 +187,10 @@ export function MatrixWallpaper() {
     };
   }, [settings.wallpaper]);
 
-  const customWp = settings.customWallpaperUrl;
+  const customWp = resolvedImageUrl || settings.customWallpaperUrl;
   const wpMode = settings.wallpaperMode || 'cover';
   const shouldRenderVideo = isVideoMode && Boolean(resolvedVideoUrl) && !isVideoError;
-  const shouldRenderImage = !shouldRenderVideo && Boolean(customWp) && settings.wallpaperType !== 'preset';
+  const shouldRenderImage = !shouldRenderVideo && Boolean(customWp) && !customWp?.startsWith('local:') && settings.wallpaperType !== 'preset';
 
   // Configurable overlay opacity
   const baseOverlay =

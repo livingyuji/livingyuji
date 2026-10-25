@@ -99,4 +99,4 @@ NEXT_PUBLIC_DISCORD_SERVER_URL=https://discord.gg/livingyuji
 - **Local-First Fallback:** If cloud credentials are not supplied, LivingYuji OS gracefully falls back to local in-memory/Zustand storage so that visitors can browse all applications, portfolios, and store products immediately.
 - **Server-Verified Administration:** Privileged API routes (`/api/admin/*`) and administrative actions in the Control Panel are strictly protected server-side with HMAC-signed session cookies and cryptographic verification.
 - **File System & Uploads:** Supports binary and text file uploads in File Explorer (`This PC`), custom desktop video wallpaper looping (.mp4, .webm), and custom avatars/favicons.
-- **Audit Documentation:** Detailed security reviews and architectural remediation reports are preserved in `docs/TECHNICAL_AUDIT.md`, `docs/ADMIN_PANEL_AUDIT.md`, and `docs/SUPABASE_SETUP.md`.
+- **Audit Documentation:** Detailed security reviews and architectural remediation reports are preserved in `docs/UPLOAD_MUSIC_SECURITY_AUDIT.md`, `docs/TECHNICAL_AUDIT.md`, `docs/ADMIN_PANEL_AUDIT.md`, and `docs/SUPABASE_SETUP.md`.

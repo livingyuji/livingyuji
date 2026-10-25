@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useWindowStore } from '@/store/windowStore';
 import { useDesktopIconStore, GRID_CONFIG } from '@/store/desktopIconStore';
 import { useFileSystemStore } from '@/store/fileSystemStore';
 import { useDiscordSettingsStore } from '@/store/discordSettingsStore';
 import { useShowcaseStore, ShowcaseProject, ProjectStatus } from '@/store/showcaseStore';
 import { checkSupabaseConnection } from '@/lib/supabase/client';
-import { saveVideoWallpaperBlob, clearVideoWallpaperBlob } from '@/lib/storage/wallpaperStorage';
+import { saveVideoWallpaperBlob, clearVideoWallpaperBlob, resolveWallpaperMediaUrl } from '@/lib/storage/wallpaperStorage';
+import { saveMusicAudioBlob, saveMusicCoverBlob, deleteMusicBlobs, resolveMusicMediaUrl } from '@/lib/storage/musicStorage';
 import {
   Shield,
   Layout,
@@ -17,6 +18,13 @@ import {
   MessageSquare,
   Briefcase,
   Image,
+  Music,
+  Play,
+  Pause,
+  Volume2,
+  Disc,
+  Eye,
+  EyeOff,
   Database,
   Download,
   Upload,
@@ -57,6 +65,7 @@ type AdminTab =
   | 'discord'
   | 'services'
   | 'media'
+  | 'music'
   | 'backup';
 
 interface AdminPanelAppProps {
@@ -259,6 +268,17 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   });
   const [isSavingBranding, setIsSavingBranding] = useState(false);
   const [logoPreviewTheme, setLogoPreviewTheme] = useState<'dark' | 'light'>('dark');
+  const [resolvedVideoPreviewUrl, setResolvedVideoPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    resolveWallpaperMediaUrl(brandingForm.customVideoWallpaperUrl, 'video').then((url) => {
+      if (!isCancelled) setResolvedVideoPreviewUrl(url);
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [brandingForm.customVideoWallpaperUrl]);
 
   // Load cloud branding
   useEffect(() => {
@@ -291,6 +311,11 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       brandName: brandingForm.brandName,
       siteTitle: brandingForm.siteTitle,
       wallpaper: brandingForm.wallpaper as any,
+      wallpaperType: brandingForm.customVideoWallpaperUrl
+        ? 'video'
+        : brandingForm.customWallpaperUrl
+        ? 'image'
+        : 'preset',
       accentColor: brandingForm.accentColor,
       theme: brandingForm.theme as any,
       customLogoUrl: brandingForm.customLogoUrl || null,
@@ -496,6 +521,245 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       }
     } catch {
       showToast('Failed to register media asset.');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // MUSIC LIBRARY STATE & ACTIONS
+  // -------------------------------------------------------------
+  const [musicTracks, setMusicTracks] = useState<any[]>([]);
+  const [isLoadingMusic, setIsLoadingMusic] = useState(false);
+  const [isMusicModalOpen, setIsMusicModalOpen] = useState(false);
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [musicSearch, setMusicSearch] = useState('');
+  const [musicGenreFilter, setMusicGenreFilter] = useState('all');
+  const [musicStatusFilter, setMusicStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
+  const [musicSort, setMusicSort] = useState<'order' | 'title' | 'artist' | 'newest'>('order');
+  const [adminPreviewTrackId, setAdminPreviewTrackId] = useState<string | null>(null);
+  const [adminAudioPlaying, setAdminAudioPlaying] = useState(false);
+  const adminAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  const initialMusicForm = {
+    title: '',
+    artist: 'LivingYuji',
+    album: 'LivingYuji Releases',
+    genre: 'Cyber Lo-Fi',
+    duration: '3:00',
+    duration_sec: 180,
+    description: '',
+    tags: 'cyber, lo-fi, chill',
+    audio_url: '',
+    cover_url: '',
+    cover_gradient: 'from-emerald-900 via-teal-950 to-slate-950',
+    published: true,
+    featured: false,
+    track_order: 1,
+    file_format: 'mp3',
+    file_size: '',
+  };
+
+  const [musicForm, setMusicForm] = useState(initialMusicForm);
+
+  const fetchMusicTracks = async () => {
+    setIsLoadingMusic(true);
+    try {
+      const res = await fetch('/api/admin/music');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.tracks)) {
+        setMusicTracks(data.tracks);
+      }
+    } catch (e) {
+      console.error('Failed to fetch music tracks', e);
+    } finally {
+      setIsLoadingMusic(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMusicTracks();
+  }, []);
+
+  const handleAudioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validExtensions = ['.mp3', '.wav', '.ogg', '.flac'];
+    const lowerName = file.name.toLowerCase();
+    const isAudio = file.type.startsWith('audio/') || validExtensions.some((ext) => lowerName.endsWith(ext));
+
+    if (!isAudio) {
+      showToast('Please select a valid audio file (.mp3, .wav, .ogg, .flac)');
+      return;
+    }
+
+    const ext = lowerName.split('.').pop() || 'mp3';
+    const trackTempId = editingTrackId || `track-${Date.now()}`;
+
+    // Read duration safely using temporary object URL
+    const tempUrl = URL.createObjectURL(file);
+    const tempAudio = new Audio(tempUrl);
+    tempAudio.onloadedmetadata = () => {
+      const sec = Math.round(tempAudio.duration) || 180;
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      const durationStr = `${m}:${s < 10 ? '0' : ''}${s}`;
+      setMusicForm((prev) => ({
+        ...prev,
+        duration: durationStr,
+        duration_sec: sec,
+      }));
+      URL.revokeObjectURL(tempUrl);
+    };
+
+    try {
+      showToast(`Saving audio file "${file.name}" to IndexedDB...`);
+      const persistentUrl = await saveMusicAudioBlob(trackTempId, file);
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+      setMusicForm((prev) => ({
+        ...prev,
+        audio_url: persistentUrl,
+        file_format: ext,
+        file_size: sizeMB,
+        title: prev.title || file.name.replace(/\.[^/.]+$/, ''),
+      }));
+      showToast('Audio file saved and verified!');
+    } catch (err) {
+      console.error('Failed to store audio file:', err);
+      showToast('Failed to save audio to local storage.');
+    }
+  };
+
+  const handleCoverFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid cover image (.png, .jpg, .webp)');
+      return;
+    }
+
+    const trackTempId = editingTrackId || `track-${Date.now()}`;
+    try {
+      const coverUrl = await saveMusicCoverBlob(trackTempId, file);
+      setMusicForm((prev) => ({
+        ...prev,
+        cover_url: coverUrl,
+      }));
+      showToast('Cover art saved!');
+    } catch (err) {
+      console.error('Failed to store cover image:', err);
+      showToast('Failed to save cover image.');
+    }
+  };
+
+  const handleSaveMusicTrack = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!musicForm.title.trim()) {
+      showToast('Track title is required.');
+      return;
+    }
+    if (!musicForm.audio_url.trim()) {
+      showToast('Audio file or valid URL is required.');
+      return;
+    }
+
+    try {
+      const isEditing = Boolean(editingTrackId);
+      const payload = {
+        ...musicForm,
+        id: editingTrackId || `track-${Date.now()}`,
+        tags: typeof musicForm.tags === 'string'
+          ? musicForm.tags.split(',').map((t) => t.trim()).filter(Boolean)
+          : musicForm.tags,
+      };
+
+      const res = await fetch('/api/admin/music', {
+        method: isEditing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to save track.');
+        return;
+      }
+
+      showToast(`Track "${payload.title}" saved successfully!`);
+      setIsMusicModalOpen(false);
+      setEditingTrackId(null);
+      setMusicForm(initialMusicForm);
+      fetchMusicTracks();
+    } catch {
+      showToast('Failed to save music track.');
+    }
+  };
+
+  const handleDeleteMusicTrack = async (id: string, title: string) => {
+    if (!confirm(`Are you sure you want to delete track "${title}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/music?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to delete track.');
+        return;
+      }
+      await deleteMusicBlobs(id);
+      showToast(`Deleted track "${title}".`);
+      fetchMusicTracks();
+    } catch {
+      showToast('Error deleting track.');
+    }
+  };
+
+  const handleTogglePublishTrack = async (track: any) => {
+    try {
+      const newStatus = !track.published;
+      const res = await fetch('/api/admin/music', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: track.id, published: newStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to update track status.');
+        return;
+      }
+      showToast(`Track "${track.title}" is now ${newStatus ? 'Published' : 'Hidden (Draft)'}.`);
+      fetchMusicTracks();
+    } catch {
+      showToast('Error updating status.');
+    }
+  };
+
+  const handleToggleAdminAudioPreview = async (track: any) => {
+    const audio = adminAudioPlayerRef.current;
+    if (!audio) return;
+
+    if (adminPreviewTrackId === track.id && adminAudioPlaying) {
+      audio.pause();
+      setAdminAudioPlaying(false);
+      return;
+    }
+
+    try {
+      const resolved = await resolveMusicMediaUrl(track.audio_url, track.id, 'audio');
+      if (resolved) {
+        audio.src = resolved;
+        await audio.play();
+        setAdminPreviewTrackId(track.id);
+        setAdminAudioPlaying(true);
+      } else {
+        showToast('No playable audio stream available for this track.');
+      }
+    } catch (err) {
+      console.warn('Admin preview playback error:', err);
+      showToast('Unable to preview audio on this device.');
     }
   };
 
@@ -750,6 +1014,18 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
           >
             <Image size={15} />
             <span>Media Library</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('music')}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left font-medium transition-all ${
+              activeTab === 'music'
+                ? 'bg-[#0078D4] text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Music size={15} />
+            <span>Music Library ({musicTracks.length})</span>
           </button>
 
           <button
@@ -1770,12 +2046,13 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
               {brandingForm.customVideoWallpaperUrl && (
                 <div className="w-full h-36 rounded-xl overflow-hidden bg-black/60 border border-white/10 relative">
                   <video
+                    key={resolvedVideoPreviewUrl || 'admin-video-preview'}
                     autoPlay
                     loop
                     muted
                     playsInline
                     className="w-full h-full object-cover"
-                    src={brandingForm.customVideoWallpaperUrl}
+                    src={resolvedVideoPreviewUrl || undefined}
                   />
                   <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[10px] text-white font-mono flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -2959,6 +3236,479 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold text-xs shadow-lg shadow-sky-500/20"
                       >
                         Register Asset
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: MUSIC LIBRARY MANAGEMENT */}
+        {activeTab === 'music' && (
+          <div className="space-y-6">
+            <audio
+              ref={adminAudioPlayerRef}
+              onEnded={() => setAdminAudioPlaying(false)}
+              className="hidden"
+            />
+
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                  <Music size={18} className="text-pink-400" />
+                  <span>Music Library Management</span>
+                </h1>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Upload, inspect, catalog, and publish audio tracks directly to the LivingYuji OS music engine.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingTrackId(null);
+                    setMusicForm(initialMusicForm);
+                    setIsMusicModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-sky-500/20"
+                >
+                  <Plus size={14} />
+                  <span>Upload Song</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="p-4 rounded-2xl bg-[#171C28] border border-white/10 flex flex-col md:flex-row items-center justify-between gap-3 shadow-md">
+              <div className="relative w-full md:w-72">
+                <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search by title, artist, album, genre..."
+                  value={musicSearch}
+                  onChange={(e) => setMusicSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-[#0078D4]"
+                />
+              </div>
+
+              <div className="flex items-center gap-2.5 w-full md:w-auto flex-wrap">
+                <select
+                  value={musicStatusFilter}
+                  onChange={(e) => setMusicStatusFilter(e.target.value as any)}
+                  className="px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs text-slate-300 outline-none focus:border-[#0078D4]"
+                >
+                  <option value="all">All Tracks</option>
+                  <option value="published">Published Only</option>
+                  <option value="draft">Drafts Only</option>
+                </select>
+
+                <select
+                  value={musicSort}
+                  onChange={(e) => setMusicSort(e.target.value as any)}
+                  className="px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs text-slate-300 outline-none focus:border-[#0078D4]"
+                >
+                  <option value="order">Track Order</option>
+                  <option value="title">Title (A-Z)</option>
+                  <option value="artist">Artist</option>
+                  <option value="newest">Newest Upload</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={fetchMusicTracks}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 transition-colors"
+                  title="Refresh library"
+                >
+                  <RefreshCw size={14} className={isLoadingMusic ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+
+            {/* Tracks Table */}
+            <div className="rounded-2xl bg-[#171C28] border border-white/10 overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-black/30 border-b border-white/10 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="py-3 px-4 w-12 text-center">#</th>
+                      <th className="py-3 px-4">Track Title</th>
+                      <th className="py-3 px-4">Album & Genre</th>
+                      <th className="py-3 px-4">Duration</th>
+                      <th className="py-3 px-4">Format & Size</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {musicTracks
+                      .filter((t) => {
+                        if (!musicSearch.trim()) return true;
+                        const q = musicSearch.toLowerCase();
+                        return (
+                          (t.title || '').toLowerCase().includes(q) ||
+                          (t.artist || '').toLowerCase().includes(q) ||
+                          (t.album || '').toLowerCase().includes(q) ||
+                          (t.genre || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .filter((t) => {
+                        if (musicStatusFilter === 'published') return t.published;
+                        if (musicStatusFilter === 'draft') return !t.published;
+                        return true;
+                      })
+                      .sort((a, b) => {
+                        if (musicSort === 'title') return (a.title || '').localeCompare(b.title || '');
+                        if (musicSort === 'artist') return (a.artist || '').localeCompare(b.artist || '');
+                        if (musicSort === 'newest') return (b.created_at || '').localeCompare(a.created_at || '');
+                        return (a.track_order || 0) - (b.track_order || 0);
+                      })
+                      .map((track, idx) => {
+                        const isThisPreviewPlaying = adminPreviewTrackId === track.id && adminAudioPlaying;
+                        return (
+                          <tr key={track.id} className="hover:bg-white/[0.02] transition-colors">
+                            {/* Track order & Preview Play */}
+                            <td className="py-3 px-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAdminAudioPreview(track)}
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                  isThisPreviewPlaying
+                                    ? 'bg-emerald-500 text-slate-950 shadow-md scale-105'
+                                    : 'bg-white/5 hover:bg-white/10 text-slate-300'
+                                }`}
+                                title={isThisPreviewPlaying ? 'Pause Preview' : 'Preview Audio'}
+                              >
+                                {isThisPreviewPlaying ? <Pause size={12} /> : <Play size={12} className="ml-0.5" />}
+                              </button>
+                            </td>
+
+                            {/* Title & Artist */}
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`w-9 h-9 rounded-lg bg-gradient-to-br ${
+                                    track.cover_gradient || 'from-indigo-600 to-purple-800'
+                                  } flex items-center justify-center shrink-0 border border-white/10 shadow-sm relative overflow-hidden`}
+                                >
+                                  {track.cover_url ? (
+                                    <img src={track.cover_url} alt={track.title} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Disc size={15} className="text-white/80" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-white text-xs truncate flex items-center gap-1.5">
+                                    <span className="truncate">{track.title}</span>
+                                    {track.featured && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono text-[9px] shrink-0 font-bold">
+                                        ★ Featured
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 truncate">{track.artist}</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Album & Genre */}
+                            <td className="py-3 px-4">
+                              <div className="text-slate-200 text-xs font-medium">{track.album}</div>
+                              <div className="text-[10px] text-slate-400">{track.genre || 'Cyber Lo-Fi'}</div>
+                            </td>
+
+                            {/* Duration */}
+                            <td className="py-3 px-4 font-mono text-slate-300 text-xs">{track.duration}</td>
+
+                            {/* Format & Size */}
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-mono text-slate-300">
+                                {track.file_format?.toUpperCase() || 'MP3'}
+                              </span>
+                              {track.file_size && (
+                                <span className="ml-1.5 text-[10px] text-slate-500 font-mono">{track.file_size}</span>
+                              )}
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-3 px-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePublishTrack(track)}
+                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                                  track.published
+                                    ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                    : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                                }`}
+                                title="Click to toggle publish status"
+                              >
+                                {track.published ? 'Published' : 'Draft'}
+                              </button>
+                            </td>
+
+                            {/* Actions */}
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleTogglePublishTrack(track)}
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300"
+                                  title={track.published ? 'Hide / Unpublish' : 'Publish to Library'}
+                                >
+                                  {track.published ? <EyeOff size={13} /> : <Eye size={13} />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingTrackId(track.id);
+                                    setMusicForm({
+                                      title: track.title,
+                                      artist: track.artist,
+                                      album: track.album,
+                                      genre: track.genre || 'Cyber Lo-Fi',
+                                      duration: track.duration,
+                                      duration_sec: track.duration_sec || 180,
+                                      description: track.description || '',
+                                      tags: Array.isArray(track.tags) ? track.tags.join(', ') : track.tags || '',
+                                      audio_url: track.audio_url,
+                                      cover_url: track.cover_url || '',
+                                      cover_gradient: track.cover_gradient || 'from-emerald-900 via-teal-950 to-slate-950',
+                                      published: track.published,
+                                      featured: track.featured,
+                                      track_order: track.track_order || 1,
+                                      file_format: track.file_format || 'mp3',
+                                      file_size: track.file_size || '',
+                                    });
+                                    setIsMusicModalOpen(true);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-400"
+                                  title="Edit Song"
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMusicTrack(track.id, track.title)}
+                                  className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400"
+                                  title="Delete Song"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              {musicTracks.length === 0 && (
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  No music tracks found in library. Click &ldquo;Upload Song&rdquo; to add your first track.
+                </div>
+              )}
+            </div>
+
+            {/* UPLOAD / EDIT MUSIC TRACK MODAL */}
+            {isMusicModalOpen && (
+              <div className="fixed inset-0 z-[9990] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                <div className="w-full max-w-xl bg-[#171C28] border border-white/10 rounded-2xl p-6 space-y-5 shadow-2xl my-8">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      <Music size={18} className="text-pink-400" />
+                      <span>{editingTrackId ? 'Edit Music Track' : 'Upload New Song to Library'}</span>
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMusicModalOpen(false);
+                        setEditingTrackId(null);
+                      }}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveMusicTrack} className="space-y-4 text-xs">
+                    {/* Audio File Upload Box */}
+                    <div className="p-4 rounded-xl bg-black/40 border border-white/10 space-y-3">
+                      <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                        <span>Audio Source File *</span>
+                        {musicForm.duration && (
+                          <span className="text-emerald-400 font-mono text-[10px]">
+                            Duration: {musicForm.duration} • Format: {musicForm.file_format.toUpperCase()}
+                          </span>
+                        )}
+                      </label>
+
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <label className="cursor-pointer px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shrink-0 shadow-sm">
+                          <Upload size={14} />
+                          <span>Select Audio File</span>
+                          <input
+                            type="file"
+                            accept="audio/mp3,audio/wav,audio/ogg,audio/flac,audio/mpeg,.mp3,.wav,.ogg,.flac"
+                            onChange={handleAudioFileUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Or enter direct public audio URL"
+                          value={musicForm.audio_url}
+                          onChange={(e) => setMusicForm({ ...musicForm, audio_url: e.target.value })}
+                          className="flex-1 px-3 py-2 rounded-xl bg-black/50 border border-white/10 text-white placeholder-slate-500 outline-none focus:border-[#0078D4] font-mono text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Metadata: Title & Artist */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-300">Track Title *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Frostbite Protocol"
+                          value={musicForm.title}
+                          onChange={(e) => setMusicForm({ ...musicForm, title: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white outline-none focus:border-[#0078D4]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-300">Artist *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. LivingYuji"
+                          value={musicForm.artist}
+                          onChange={(e) => setMusicForm({ ...musicForm, artist: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white outline-none focus:border-[#0078D4]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Album & Genre */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-[11px] font-semibold text-slate-300">Album Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Christmas 2025: New Tales"
+                          value={musicForm.album}
+                          onChange={(e) => setMusicForm({ ...musicForm, album: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white outline-none focus:border-[#0078D4]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-300">Genre</label>
+                        <input
+                          type="text"
+                          placeholder="Cyber Lo-Fi"
+                          value={musicForm.genre}
+                          onChange={(e) => setMusicForm({ ...musicForm, genre: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white outline-none focus:border-[#0078D4]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Artwork Upload & Gradient */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-300">Cover Artwork</label>
+                        <div className="flex items-center gap-2">
+                          <label className="cursor-pointer px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 font-medium text-xs flex items-center justify-center gap-1.5 shrink-0">
+                            <Upload size={12} />
+                            <span>Upload Art</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleCoverFileUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Or image URL"
+                            value={musicForm.cover_url}
+                            onChange={(e) => setMusicForm({ ...musicForm, cover_url: e.target.value })}
+                            className="flex-1 px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white placeholder-slate-500 outline-none focus:border-[#0078D4] text-[11px]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-300">Cover Gradient Preset</label>
+                        <select
+                          value={musicForm.cover_gradient}
+                          onChange={(e) => setMusicForm({ ...musicForm, cover_gradient: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white outline-none focus:border-[#0078D4]"
+                        >
+                          <option value="from-emerald-900 via-teal-950 to-slate-950">Emerald Midnight</option>
+                          <option value="from-purple-900 via-indigo-950 to-slate-950">Cyber Violet</option>
+                          <option value="from-amber-900 via-stone-950 to-slate-950">Warm Lo-Fi Amber</option>
+                          <option value="from-blue-900 via-slate-950 to-black">Deep Cyber Blue</option>
+                          <option value="from-rose-900 via-purple-950 to-slate-950">Neon Rose</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Description & Tags */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-300">Track Description</label>
+                      <textarea
+                        rows={2}
+                        placeholder="Description, instruments used, or context behind this audio piece..."
+                        value={musicForm.description}
+                        onChange={(e) => setMusicForm({ ...musicForm, description: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white outline-none focus:border-[#0078D4] resize-none"
+                      />
+                    </div>
+
+                    {/* Flags: Published & Featured */}
+                    <div className="flex items-center gap-6 pt-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={musicForm.published}
+                          onChange={(e) => setMusicForm({ ...musicForm, published: e.target.checked })}
+                          className="rounded border-white/20 bg-black/40 text-[#0078D4]"
+                        />
+                        <span className="text-white font-medium">Publish to User-Facing Music Player</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={musicForm.featured}
+                          onChange={(e) => setMusicForm({ ...musicForm, featured: e.target.checked })}
+                          className="rounded border-white/20 bg-black/40 text-[#0078D4]"
+                        />
+                        <span className="text-white font-medium">Feature on Home Spotlight</span>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsMusicModalOpen(false);
+                          setEditingTrackId(null);
+                        }}
+                        className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-medium"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold shadow-lg shadow-sky-500/20"
+                      >
+                        {editingTrackId ? 'Save Changes' : 'Publish Track'}
                       </button>
                     </div>
                   </form>

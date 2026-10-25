@@ -18,6 +18,7 @@ import {
   X,
   ShieldAlert,
 } from 'lucide-react';
+import { SafeLinkifiedText } from '@/components/common/SafeLinkifiedText';
 
 interface TextViewerAppProps {
   initialFileId?: string;
@@ -430,10 +431,10 @@ export function TextViewerApp({ initialFileId, initialFolderId }: TextViewerAppP
               );
             }
 
-            // Standard paragraphs with search keyword highlighting
+            // Standard paragraphs with search keyword highlighting and clickable links
             return (
               <p key={pIdx} className="text-slate-300 leading-relaxed font-normal whitespace-pre-line">
-                {highlightMatches(trimmed, searchQuery)}
+                <SafeLinkifiedText text={trimmed} searchQuery={searchQuery} showIcon={true} />
               </p>
             );
           })}
