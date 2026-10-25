@@ -7,6 +7,7 @@ import { useFileSystemStore } from '@/store/fileSystemStore';
 import { useDiscordSettingsStore } from '@/store/discordSettingsStore';
 import { useShowcaseStore, ShowcaseProject, ProjectStatus } from '@/store/showcaseStore';
 import { checkSupabaseConnection } from '@/lib/supabase/client';
+import { saveVideoWallpaperBlob, clearVideoWallpaperBlob } from '@/lib/storage/wallpaperStorage';
 import {
   Shield,
   Layout,
@@ -329,7 +330,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
   };
 
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -338,15 +339,23 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       return;
     }
 
-    const localVideoUrl = URL.createObjectURL(file);
-    setBrandingForm((prev) => ({
-      ...prev,
-      customVideoWallpaperUrl: localVideoUrl,
-    }));
-    updateSettings({
-      customVideoWallpaperUrl: localVideoUrl,
-    });
-    showToast(`Video wallpaper "${file.name}" applied!`);
+    try {
+      showToast('Saving video wallpaper to persistent storage...');
+      const activeUrl = await saveVideoWallpaperBlob(file);
+      setBrandingForm((prev) => ({
+        ...prev,
+        customVideoWallpaperUrl: activeUrl,
+      }));
+      updateSettings({
+        wallpaperType: 'video',
+        videoWallpaperSource: 'local',
+        customVideoWallpaperUrl: activeUrl,
+      });
+      showToast(`Video wallpaper "${file.name}" saved & applied!`);
+    } catch (err) {
+      console.error('Failed to save video wallpaper:', err);
+      showToast('Failed to save video file to storage.');
+    }
   };
 
   // -------------------------------------------------------------
@@ -1639,11 +1648,15 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         type="button"
                         onClick={() => {
                           setBrandingForm({ ...brandingForm, wallpaper: wp });
-                          updateSettings({ wallpaper: wp });
-                          showToast(`Wallpaper changed to ${wp}`);
+                          updateSettings({
+                            wallpaper: wp,
+                            wallpaperType: 'preset',
+                          });
+                          showToast(`Wallpaper changed to preset: ${wp}`);
                         }}
                         className={`p-3 rounded-xl border text-left flex flex-col justify-between h-20 capitalize font-medium transition-all ${
-                          brandingForm.wallpaper === wp && !brandingForm.customWallpaperUrl
+                          (settings.wallpaperType === 'preset' || (!settings.wallpaperType && !settings.customVideoWallpaperUrl && !settings.customWallpaperUrl)) &&
+                          settings.wallpaper === wp
                             ? 'border-[#0078D4] bg-[#0078D4]/20 text-white shadow-lg'
                             : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
                         }`}
@@ -1719,18 +1732,37 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                   <span>Desktop Video Wallpaper</span>
                 </div>
                 {brandingForm.customVideoWallpaperUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: '' });
-                      updateSettings({ customVideoWallpaperUrl: null });
-                      showToast('Video wallpaper removed');
-                    }}
-                    className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1"
-                  >
-                    <Trash2 size={12} />
-                    <span>Clear Video Wallpaper</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {settings.wallpaperType !== 'video' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateSettings({ wallpaperType: 'video' });
+                          showToast('Switched to Video Wallpaper mode');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[11px] font-medium hover:bg-purple-500/30"
+                      >
+                        ▶ Activate Video
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await clearVideoWallpaperBlob();
+                        setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: '' });
+                        updateSettings({
+                          wallpaperType: brandingForm.customWallpaperUrl ? 'image' : 'preset',
+                          videoWallpaperSource: null,
+                          customVideoWallpaperUrl: null,
+                        });
+                        showToast('Video wallpaper removed');
+                      }}
+                      className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1"
+                    >
+                      <Trash2 size={12} />
+                      <span>Clear Video Wallpaper</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -1773,7 +1805,11 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       onChange={(e) => {
                         const url = e.target.value;
                         setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: url });
-                        updateSettings({ customVideoWallpaperUrl: url || null });
+                        updateSettings({
+                          wallpaperType: url ? 'video' : (brandingForm.customWallpaperUrl ? 'image' : 'preset'),
+                          videoWallpaperSource: url ? 'url' : null,
+                          customVideoWallpaperUrl: url || null,
+                        });
                       }}
                       placeholder="Or enter direct video link (.mp4 or .webm)"
                       className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:border-[#0078D4] outline-none font-mono text-[11px]"
@@ -1804,7 +1840,11 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         type="button"
                         onClick={() => {
                           setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: preset.url });
-                          updateSettings({ customVideoWallpaperUrl: preset.url });
+                          updateSettings({
+                            wallpaperType: 'video',
+                            videoWallpaperSource: 'url',
+                            customVideoWallpaperUrl: preset.url,
+                          });
                           showToast(`Applied "${preset.name}" video wallpaper!`);
                         }}
                         className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${

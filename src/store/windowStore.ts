@@ -61,8 +61,13 @@ export type Wallpaper =
   | 'forest'
   | 'dark';
 
+export type WallpaperType = 'preset' | 'image' | 'video';
+export type VideoWallpaperSource = 'local' | 'url' | null;
+
 export interface OSSettings {
   wallpaper: Wallpaper;
+  wallpaperType?: WallpaperType;
+  videoWallpaperSource?: VideoWallpaperSource;
   theme: 'dark' | 'light' | 'system';
   accentColor: string;
   reducedMotion: boolean;
@@ -161,6 +166,8 @@ export const APP_CONFIGS: Record<AppId, { title: string; defaultWidth: number; d
 
 const DEFAULT_SETTINGS: OSSettings = {
   wallpaper: 'matrix',
+  wallpaperType: 'image',
+  videoWallpaperSource: null,
   theme: 'dark',
   accentColor: '#1686DC',
   reducedMotion: false,
@@ -389,9 +396,17 @@ export const useWindowStore = create<WindowStore>()(
     }),
     {
       name: 'lyos-window-store',
-      partialize: (state) => ({
-        settings: state.settings,
-      }),
+      partialize: (state) => {
+        const settings = { ...state.settings };
+        // Never serialize temporary in-memory blob: URLs to localStorage
+        if (settings.customVideoWallpaperUrl && settings.customVideoWallpaperUrl.startsWith('blob:')) {
+          settings.customVideoWallpaperUrl = 'local:lyos_video_wallpaper_blob';
+          settings.videoWallpaperSource = 'local';
+        }
+        return {
+          settings,
+        };
+      },
     }
   )
 );

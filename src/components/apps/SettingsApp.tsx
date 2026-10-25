@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useWindowStore, Wallpaper } from '@/store/windowStore';
 import { useFileSystemStore } from '@/store/fileSystemStore';
 import { useDesktopIconStore } from '@/store/desktopIconStore';
+import { saveVideoWallpaperBlob, clearVideoWallpaperBlob } from '@/lib/storage/wallpaperStorage';
 import {
   Laptop,
   Palette,
@@ -43,16 +44,25 @@ export function SettingsApp() {
   const [is24Hour, setIs24Hour] = useState<boolean>(false);
   const [videoUrlInput, setVideoUrlInput] = useState<string>(settings.customVideoWallpaperUrl || '');
 
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.includes('mp4') && !file.type.includes('webm')) {
       alert('Please upload an MP4 or WebM video file.');
       return;
     }
-    const blobUrl = URL.createObjectURL(file);
-    setVideoUrlInput(blobUrl);
-    updateSettings({ customVideoWallpaperUrl: blobUrl });
+    try {
+      const blobUrl = await saveVideoWallpaperBlob(file);
+      setVideoUrlInput(file.name);
+      updateSettings({
+        wallpaperType: 'video',
+        videoWallpaperSource: 'local',
+        customVideoWallpaperUrl: blobUrl,
+      });
+    } catch (err) {
+      console.error('Failed to save video wallpaper:', err);
+      alert('Failed to store video wallpaper.');
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -61,7 +71,10 @@ export function SettingsApp() {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        updateSettings({ customWallpaperUrl: reader.result });
+        updateSettings({
+          wallpaperType: 'image',
+          customWallpaperUrl: reader.result,
+        });
       }
     };
     reader.readAsDataURL(file);
@@ -308,19 +321,35 @@ export function SettingsApp() {
                   </div>
                 </div>
 
-                {settings.customVideoWallpaperUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      updateSettings({ customVideoWallpaperUrl: null });
-                      setVideoUrlInput('');
-                    }}
-                    className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"
-                  >
-                    <Trash2 size={12} />
-                    <span>Clear Video</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {settings.customVideoWallpaperUrl && settings.wallpaperType !== 'video' && (
+                    <button
+                      type="button"
+                      onClick={() => updateSettings({ wallpaperType: 'video' })}
+                      className="px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[11px] font-semibold hover:bg-purple-500/30 transition-colors"
+                    >
+                      ▶ Apply Video Wallpaper
+                    </button>
+                  )}
+                  {settings.customVideoWallpaperUrl && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await clearVideoWallpaperBlob();
+                        updateSettings({
+                          wallpaperType: settings.customWallpaperUrl ? 'image' : 'preset',
+                          videoWallpaperSource: null,
+                          customVideoWallpaperUrl: null,
+                        });
+                        setVideoUrlInput('');
+                      }}
+                      className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"
+                    >
+                      <Trash2 size={12} />
+                      <span>Clear Video</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Active Video Preview */}
@@ -361,7 +390,11 @@ export function SettingsApp() {
                     onChange={(e) => {
                       const url = e.target.value;
                       setVideoUrlInput(url);
-                      updateSettings({ customVideoWallpaperUrl: url || null });
+                      updateSettings({
+                        wallpaperType: url ? 'video' : (settings.customWallpaperUrl ? 'image' : 'preset'),
+                        videoWallpaperSource: url ? 'url' : null,
+                        customVideoWallpaperUrl: url || null,
+                      });
                     }}
                     placeholder="Or paste direct video URL (.mp4, .webm)"
                     className="flex-1 px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:border-[#0078D4] outline-none font-mono text-[11px]"
@@ -377,7 +410,11 @@ export function SettingsApp() {
                       onClick={() => {
                         const url = 'https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-screens-with-code-31910-large.mp4';
                         setVideoUrlInput(url);
-                        updateSettings({ customVideoWallpaperUrl: url });
+                        updateSettings({
+                          wallpaperType: 'video',
+                          videoWallpaperSource: 'url',
+                          customVideoWallpaperUrl: url,
+                        });
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 border border-white/10 hover:border-emerald-500/50 text-[11px] text-emerald-400 text-left truncate transition-colors"
                     >
@@ -388,7 +425,11 @@ export function SettingsApp() {
                       onClick={() => {
                         const url = 'https://assets.mixkit.co/videos/preview/mixkit-tunnel-of-futuristic-neon-lights-seamless-loop-41584-large.mp4';
                         setVideoUrlInput(url);
-                        updateSettings({ customVideoWallpaperUrl: url });
+                        updateSettings({
+                          wallpaperType: 'video',
+                          videoWallpaperSource: 'url',
+                          customVideoWallpaperUrl: url,
+                        });
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 border border-white/10 hover:border-sky-500/50 text-[11px] text-sky-400 text-left truncate transition-colors"
                     >
@@ -399,7 +440,11 @@ export function SettingsApp() {
                       onClick={() => {
                         const url = 'https://assets.mixkit.co/videos/preview/mixkit-abstract-laser-lights-background-animation-42512-large.mp4';
                         setVideoUrlInput(url);
-                        updateSettings({ customVideoWallpaperUrl: url });
+                        updateSettings({
+                          wallpaperType: 'video',
+                          videoWallpaperSource: 'url',
+                          customVideoWallpaperUrl: url,
+                        });
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 border border-white/10 hover:border-purple-500/50 text-[11px] text-purple-400 text-left truncate transition-colors"
                     >
@@ -453,14 +498,30 @@ export function SettingsApp() {
                 </div>
 
                 {settings.customWallpaperUrl && (
-                  <button
-                    type="button"
-                    onClick={() => updateSettings({ customWallpaperUrl: null })}
-                    className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"
-                  >
-                    <Trash2 size={12} />
-                    <span>Clear Custom Image</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {settings.wallpaperType !== 'image' && (
+                      <button
+                        type="button"
+                        onClick={() => updateSettings({ wallpaperType: 'image' })}
+                        className="px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[11px] font-semibold hover:bg-sky-500/30 transition-colors"
+                      >
+                        ▶ Apply Image
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSettings({
+                          wallpaperType: 'preset',
+                          customWallpaperUrl: null,
+                        })
+                      }
+                      className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"
+                    >
+                      <Trash2 size={12} />
+                      <span>Clear Custom Image</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -479,7 +540,12 @@ export function SettingsApp() {
                 <input
                   type="url"
                   value={settings.customWallpaperUrl || ''}
-                  onChange={(e) => updateSettings({ customWallpaperUrl: e.target.value || null })}
+                  onChange={(e) =>
+                    updateSettings({
+                      wallpaperType: e.target.value ? 'image' : 'preset',
+                      customWallpaperUrl: e.target.value || null,
+                    })
+                  }
                   placeholder="Or paste image URL (https://...)"
                   className="flex-1 px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:border-[#0078D4] outline-none font-mono text-[11px]"
                 />
@@ -494,10 +560,13 @@ export function SettingsApp() {
                   <button
                     key={wp.id}
                     onClick={() => {
-                      updateSettings({ wallpaper: wp.id, customWallpaperUrl: null });
+                      updateSettings({
+                        wallpaperType: 'preset',
+                        wallpaper: wp.id,
+                      });
                     }}
                     className={`p-3.5 rounded-xl border text-left transition-all flex flex-col gap-2.5 ${
-                      settings.wallpaper === wp.id && !settings.customWallpaperUrl
+                      settings.wallpaperType === 'preset' && settings.wallpaper === wp.id
                         ? 'border-[#0078D4] bg-[#0078D4]/15 ring-1 ring-[#0078D4]'
                         : 'border-white/10 hover:border-white/20 bg-black/20'
                     }`}

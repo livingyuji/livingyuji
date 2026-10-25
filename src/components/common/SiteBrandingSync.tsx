@@ -13,15 +13,17 @@ export function SiteBrandingSync() {
       .then((data) => {
         if (data && data.success && data.settings) {
           const s = data.settings;
+          const current = useWindowStore.getState().settings;
+          
           updateSettings({
             brandName: s.brand_name || 'LivingYuji',
             siteTitle: s.site_title || 'LivingYuji OS — Windows-Inspired Web Operating System & Portfolio',
-            wallpaper: s.wallpaper || settings.wallpaper,
-            accentColor: s.accent_color || settings.accentColor,
-            theme: s.theme || settings.theme,
+            wallpaper: s.wallpaper || current.wallpaper,
+            accentColor: s.accent_color || current.accentColor,
+            theme: s.theme || current.theme,
             customLogoUrl: s.custom_logo_url,
             customFaviconUrl: s.custom_favicon_url,
-            customWallpaperUrl: s.custom_wallpaper_url,
+            ...(current.wallpaperType !== 'video' ? { customWallpaperUrl: s.custom_wallpaper_url } : {}),
           });
         }
       })
