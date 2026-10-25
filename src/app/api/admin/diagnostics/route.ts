@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAuthenticatedAdmin, signSessionToken, verifySessionToken } from '@/lib/auth/adminAuth';
 import { createServiceClient } from '@/lib/supabase/server';
-import { getLocalStore } from '@/lib/storage/serverStore';
+import { getLocalStore, isServerlessReadOnlyEnvironment } from '@/lib/storage/serverStore';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -65,6 +65,11 @@ export async function GET(req: NextRequest) {
     admin_session_secret: {
       configured: Boolean(secret),
       length: secret ? secret.length : 0,
+    },
+    runtime: {
+      is_serverless_readonly: isServerlessReadOnlyEnvironment(),
+      node_env: process.env.NODE_ENV || 'development',
+      platform: process.env.VERCEL ? 'vercel' : 'standard',
     },
   };
 

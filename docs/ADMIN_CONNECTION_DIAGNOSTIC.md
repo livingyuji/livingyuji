@@ -212,13 +212,14 @@ ON CONFLICT (id) DO NOTHING;
 
 2. Automated Unit & Integration Tests:
    npm test --prefix "b:\Own Plugins\livingyuji-os"
-   PASS __tests__/SafeLinkifiedText.test.ts
    PASS __tests__/AdminDiagnostics.test.ts
+   PASS __tests__/SafeLinkifiedText.test.ts
+   PASS __tests__/ServerlessReadOnlyPersistence.test.ts
    PASS __tests__/AdminPersistence.test.ts
-   Test Suites: 3 passed, 3 total
-   Tests:       21 passed, 21 total
+   Test Suites: 4 passed, 4 total
+   Tests:       26 passed, 26 total
    Snapshots:   0 total
-   Time:        13.072 s
+   Time:        11.975 s
 
 3. Next.js Production Build:
    npm run build --prefix "b:\Own Plugins\livingyuji-os"
@@ -229,3 +230,37 @@ ON CONFLICT (id) DO NOTHING;
    ✓ Finalizing page optimization
    Result: Exit code 0 (27 static pages + dynamic route handlers).
 ```
+
+---
+
+## 9. Vercel Serverless Read-Only Filesystem (EROFS) Root Cause & Architecture Fix
+
+### 9.1 The Error Observed on Vercel
+```
+EROFS: read-only file system, open '/var/task/data/admin-store.json.1792953350241.tmp'
+```
+
+### 9.2 Technical Root Cause
+1. On Vercel (AWS Lambda serverless environment), `process.cwd()` points to `/var/task`, where the deployment bundle is mounted in a strictly **read-only** filesystem.
+2. Previously, `src/lib/storage/serverStore.ts` executed `await saveLocalStore(local)` on every admin save call *before* syncing to Supabase.
+3. `saveLocalStore` attempted `await fs.promises.mkdir(DATA_DIR, { recursive: true })` and `await fs.promises.writeFile(tmpFile, ...)` under `/var/task/data/`.
+4. In serverless runtime, this threw `EROFS` immediately, crashing the API route with HTTP 500 and preventing database synchronization from ever executing.
+
+### 9.3 Architectural Remediation
+1. **Serverless & Read-Only Detection (`isServerlessReadOnlyEnvironment`):**
+   - Detects `process.env.VERCEL === '1'`, `process.env.AWS_LAMBDA_FUNCTION_NAME`, or `process.env.NODE_ENV === 'production'`.
+   - In serverless/production mode, filesystem writes to `/var/task/data` or project directories are **completely eliminated**.
+2. **Authoritative Supabase Mutations:**
+   - In production, admin mutations are applied directly and authoritatively against Supabase tables via `createServiceClient()` (`site_settings`, `discord_settings`, `showcase_projects`, `minecraft_products`, `media_library`, `music_tracks`).
+   - If Supabase is unconfigured in production, a descriptive HTTP 500 error is returned explaining that durable database configuration is required, rather than attempting ephemeral disk writes.
+3. **Resilient PGRST204 Schema Fallback:**
+   - If the remote Supabase schema has not yet applied custom video wallpaper columns (`PGRST204: Could not find the 'custom_video_wallpaper_url' column`), the persistence layer automatically falls back to saving base branding columns without crashing, returning an actionable migration warning to the admin dashboard.
+4. **Development Local Mirror (`syncLocalStoreIfDev`):**
+   - Local disk persistence (`data/admin-store.json`) is maintained purely as an offline mirror during local development (`process.env.NODE_ENV !== 'production'`), completely isolated from serverless runtimes.
+5. **Diagnostics Dashboard Integration:**
+   - `/api/admin/diagnostics` now reports `runtime_environment.is_serverless_readonly`, `runtime_environment.platform`, and `runtime_environment.node_env` so administrators can instantly audit host storage status from the UI.
+6. **Regression Tests (`__tests__/ServerlessReadOnlyPersistence.test.ts`):**
+   - Verifies serverless environment detection.
+   - Verifies zero filesystem operations are triggered on `VERCEL=1`.
+   - Verifies mutations write directly to the cloud database in production.
+

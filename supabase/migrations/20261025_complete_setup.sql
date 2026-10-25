@@ -6,7 +6,13 @@
 -- Run this in your Supabase SQL Editor if any tables or buckets are missing.
 -- ====================================================================
 
--- 1. MUSIC TRACKS TABLE
+-- 1. EXTEND SITE SETTINGS FOR VIDEO WALLPAPER & ADVANCED APPEARANCE
+ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS custom_video_wallpaper_url TEXT;
+ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS video_wallpaper_muted BOOLEAN DEFAULT true;
+ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS wallpaper_mode TEXT DEFAULT 'cover';
+ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS wallpaper_opacity INTEGER DEFAULT 85;
+
+-- 2. MUSIC TRACKS TABLE
 CREATE TABLE IF NOT EXISTS public.music_tracks (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,

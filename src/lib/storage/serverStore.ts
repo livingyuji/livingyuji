@@ -100,8 +100,8 @@ export interface MusicTrackRecord {
   duration: string;
   duration_sec: number;
   genre: string;
-  description?: string;
-  tags?: string[];
+  description: string;
+  tags: string[];
   audio_url: string;
   cover_url?: string | null;
   cover_gradient?: string;
@@ -109,7 +109,7 @@ export interface MusicTrackRecord {
   featured: boolean;
   track_order: number;
   file_format: string;
-  file_size?: string;
+  file_size: string;
   created_at: string;
   updated_at: string;
 }
@@ -119,7 +119,7 @@ export interface MediaAssetRecord {
   name: string;
   url: string;
   type: string;
-  size?: string;
+  size: string;
   created_at: string;
 }
 
@@ -132,7 +132,7 @@ export interface AdminStoreData {
   media_assets: MediaAssetRecord[];
 }
 
-const DEFAULT_STORE: AdminStoreData = {
+export const DEFAULT_STORE: AdminStoreData = {
   site_settings: {
     id: 'default',
     brand_name: 'LivingYuji',
@@ -147,7 +147,7 @@ const DEFAULT_STORE: AdminStoreData = {
     video_wallpaper_muted: true,
     wallpaper_mode: 'cover',
     wallpaper_opacity: 85,
-    updated_at: '2026-10-25T00:00:00Z',
+    updated_at: '2026-10-25T12:00:00.000Z',
   },
   discord_settings: {
     id: 'default',
@@ -164,259 +164,167 @@ const DEFAULT_STORE: AdminStoreData = {
     button_label_services: 'Inquire on Discord',
     purchase_instructions:
       '1. Join the LivingYuji Discord server.\n2. Navigate to the #orders or #tickets channel.\n3. Mention the product code or name to open an order ticket.\n4. LivingYuji or our automated assistant will verify payment & deliver your asset instantly.',
-    updated_at: '2026-10-25T00:00:00Z',
+    updated_at: '2026-10-25T12:00:00.000Z',
   },
   showcase_projects: [
     {
-      id: 'proj-livingyuji-os',
-      title: 'LivingYuji OS',
-      slug: 'livingyuji-os',
-      category_id: 'web-apps',
-      summary: 'Browser-based Windows desktop operating system, portfolio and media workspace.',
-      description:
-        'LivingYuji OS is an interactive web desktop operating system built with Next.js 14, React 18, and TypeScript. Features a window manager with drag, resize, maximize/minimize, a virtual NTFS filesystem with C: and D: drives, text viewer, Paint canvas, digital stores, matrix background synthesizers, and seamless Discord purchasing coordination.',
-      features: [
-        'Interactive Windows 11 window manager with boundary clamping & Z-index stacking',
-        'Virtual NTFS File System supporting C: and D: drives',
-        'Built-in Document Viewer with safe link detection',
-        'Admin control console with Supabase cloud synchronisation & persistent local storage',
-        'Matrix rain phosphor canvas & synthesizer workstation',
-      ],
-      technologies: ['Next.js 14', 'React 18', 'TypeScript', 'Tailwind CSS', 'Zustand', 'Supabase'],
-      status: 'Released',
-      featured: true,
-      is_free: true,
-      price: 0,
-      version: 'v2.5',
-      gradient_bg: 'from-blue-600 via-sky-700 to-indigo-900',
-      icon_symbol: '💻',
-      links: {
-        liveDemo: 'https://livingyuji.com',
-        github: 'https://github.com/livingyuji/livingyuji',
-      },
-      screenshots: ['/screenshots/desktop.png'],
-      created_at: '2026-10-25T00:00:00Z',
-      updated_at: '2026-10-25T00:00:00Z',
-    },
-    {
-      id: 'proj-arcane-arsenal',
-      title: 'ArcaneArsenal — Magical Weapons Engine',
+      id: 'arcane-arsenal',
+      title: 'ArcaneArsenal',
       slug: 'arcane-arsenal',
       category_id: 'mc-plugins',
-      summary: 'Production-grade custom weapon framework with 10+ arcane items, particle raycasting & sound FX.',
+      summary: 'RPG weapon skills engine for Paper & Purpur 1.21.4',
       description:
-        'ArcaneArsenal is a high-performance custom weapon system built for Paper and Purpur servers. Features 10+ mythical weapons with raycasted particle beams, sound FX, cooldown management, and complete CustomModelData support for resource packs.',
-      features: [
-        '10+ unique weapons (Voidwalker Scythe, Sunfire Blade, Tempest Bow, etc.)',
-        'Zero-lag asynchronous particle raycasting math',
-        'Full CustomModelData compatibility for 3D resource packs',
-        'YAML configuration for damage, cooldowns, and sound pitches',
-        'Paper & Purpur 1.21.4 native compatibility',
-      ],
-      technologies: ['Java 21', 'PaperMC API', 'Purpur API', 'CustomModelData', 'YAML'],
+        'ArcaneArsenal introduces 45+ unique active and passive combat abilities bound to customizable weapons.',
+      features: ['45+ Custom Skills', 'Custom Model Data Support', 'MySQL / SQLite Sync'],
+      technologies: ['Java 21', 'PaperMC', 'Adventure API', 'Gradle'],
+      status: 'Released',
+      featured: true,
+      is_free: false,
+      price: 14.99,
+      version: 'v2.4.1',
+      gradient_bg: 'from-amber-600 to-red-900',
+      icon_symbol: '⚔️',
+      links: { discord: 'https://discord.gg/livingyuji' },
+      compatibility: { mc_versions: ['1.21.4', '1.20.x'] },
+      screenshots: ['/showcase/arcane-1.png'],
+      created_at: '2026-10-20T10:00:00.000Z',
+      updated_at: '2026-10-25T12:00:00.000Z',
+    },
+    {
+      id: 'living-os-web',
+      title: 'LivingYuji OS Web Platform',
+      slug: 'living-os-web',
+      category_id: 'web-apps',
+      summary: 'Interactive web operating system and developer showcase platform',
+      description: 'A Windows-inspired web desktop operating system built with Next.js and Tailwind CSS.',
+      features: ['Window Management', 'Virtual Filesystem', 'Music Player', 'Admin Control Panel'],
+      technologies: ['Next.js 14', 'TypeScript', 'Tailwind CSS', 'Supabase'],
       status: 'Released',
       featured: true,
       is_free: true,
       price: 0,
-      version: 'v1.4.2',
-      gradient_bg: 'from-purple-700 via-indigo-800 to-slate-900',
-      icon_symbol: '⚔️',
-      links: {
-        github: 'https://github.com/livingyuji/livingyuji',
-      },
-      screenshots: [],
-      created_at: '2026-10-25T00:00:00Z',
-      updated_at: '2026-10-25T00:00:00Z',
+      version: 'v1.0.0',
+      gradient_bg: 'from-blue-600 to-indigo-900',
+      icon_symbol: '💻',
+      links: { demo: '/' },
+      created_at: '2026-10-22T10:00:00.000Z',
+      updated_at: '2026-10-25T12:00:00.000Z',
     },
   ],
   minecraft_products: [
     {
-      id: 'prod-arcane-arsenal',
-      name: 'ArcaneArsenal — Magical Weapons Engine',
-      category: 'weapons',
-      category_name: 'Custom Weapons & Abilities',
-      short_desc: '10+ arcane weapons with particle rays, sound design & custom model data integration.',
-      full_desc:
-        'ArcaneArsenal is a production-grade custom weapon system built for Paper and Purpur servers. Features 10+ mythical weapons with raycasted particle beams, sound FX, cooldown management, and complete CustomModelData support for resource packs.',
-      price: 0,
-      is_free: true,
-      version: 'v1.4.2',
-      mc_versions: ['1.21.4', '1.21.1', '1.20.4'],
-      server_software: ['Purpur', 'Paper', 'Folia'],
-      dependencies: ['ProtocolLib', 'PlaceholderAPI (Optional)'],
-      features: [
-        '10+ mythical weapons (Solar Bow, Void Blade, Storm Wand, Arcane Scythe)',
-        'Raycast projectile physics and particle trail effects',
-        'Configurable mana, cooldowns, and damage multipliers',
-        'Custom Model Data integration ready',
-      ],
-      installation_steps: [
-        'Download ArcaneArsenal-v1.4.2.jar',
-        'Place into plugins/ directory',
-        'Restart server',
-      ],
-      changelog: 'v1.4.2 — Added Paper 1.21.4 support.',
-      file_format: '.jar',
-      file_size: '412 KB',
-      creator: 'LivingYuji',
-      published: true,
-      featured: true,
-      rating: 5.0,
-      downloads_count: 1420,
-      icon_bg: 'from-indigo-600 to-purple-800',
-      icon_symbol: '⚔️',
-      download_url: 'https://discord.gg/livingyuji',
-      created_at: '2026-10-25T00:00:00Z',
-      updated_at: '2026-10-25T00:00:00Z',
-    },
-    {
-      id: 'prod-vanta-combat',
-      name: 'VantaCombat — High-Tickrate PvP Suite',
+      id: 'living-custom-enchants',
+      name: 'LivingCustomEnchants Pro',
       category: 'plugins',
       category_name: 'Plugins',
-      short_desc: 'Instant hit registration, smooth knockback tuning & anti-combat log system.',
-      full_desc:
-        'VantaCombat re-engineers melee and projectile combat for high-stakes PvP servers. Eliminates missed hit-ticks, offers custom knockback profiles, action-bar combat tagging, and graceful combat logging protection.',
-      price: 0,
-      is_free: true,
-      version: 'v2.1.0',
-      mc_versions: ['1.21.4', '1.21.1', '1.20.4', '1.19.4'],
-      server_software: ['Purpur', 'Paper', 'Velocity'],
-      dependencies: ['None (Self-contained)'],
-      features: [
-        'Zero-delay hit registration pipeline',
-        'Custom knockback physics (horizontal, vertical multipliers)',
-        'Action-bar combat tagging timer',
-      ],
-      installation_steps: [
-        'Download VantaCombat-v2.1.0.jar',
-        'Put in /plugins directory and restart server',
-      ],
-      changelog: 'v2.1.0 — 1.21.4 update with sound feedback.',
+      short_desc: 'Next-generation custom enchantment suite for 1.21.4',
+      full_desc: 'Complete custom enchantment engine with 60+ unique enchantments, custom dusts, scrolls, and books.',
+      price: 19.99,
+      is_free: false,
+      version: 'v3.2.0',
+      mc_versions: ['1.21.4', '1.20.6'],
+      server_software: ['Paper', 'Purpur'],
+      dependencies: ['Vault'],
+      features: ['60+ Custom Enchantments', 'GUI Tinker & Alchemist', 'Full RGB Color Support'],
+      installation_steps: ['Download .jar', 'Place in plugins/ folder', 'Restart server'],
+      changelog: 'v3.2.0: Added 1.21.4 support',
       file_format: '.jar',
-      file_size: '320 KB',
+      file_size: '2.4 MB',
       creator: 'LivingYuji',
       published: true,
       featured: true,
       rating: 4.9,
-      downloads_count: 890,
-      icon_bg: 'from-blue-600 to-cyan-800',
-      icon_symbol: '⚡',
-      download_url: 'https://discord.gg/livingyuji',
-      created_at: '2026-10-25T00:00:00Z',
-      updated_at: '2026-10-25T00:00:00Z',
+      downloads_count: 1420,
+      icon_bg: 'from-purple-600 to-indigo-900',
+      icon_symbol: '✨',
+      created_at: '2026-10-20T10:00:00.000Z',
+      updated_at: '2026-10-25T12:00:00.000Z',
+    },
+    {
+      id: 'cyber-hud-pack',
+      name: 'CyberHUD Deluxe Resource Pack',
+      category: 'resource-packs',
+      category_name: 'Resource Packs',
+      short_desc: 'Futuristic sci-fi UI and action bar overlay for Minecraft',
+      full_desc: 'Transform your Minecraft experience with high-tech custom HUD elements, boss bars, and menus.',
+      price: 0,
+      is_free: true,
+      version: 'v1.1',
+      mc_versions: ['1.21.4'],
+      server_software: ['Vanilla', 'OptiFine', 'Iris'],
+      dependencies: [],
+      features: ['Custom Hearts & Armor Bar', 'Sci-Fi Inventory Screen', 'OptiFine CEM Support'],
+      installation_steps: ['Download .zip', 'Move to resourcepacks/', 'Activate in Resource Packs menu'],
+      changelog: 'Initial release',
+      file_format: '.zip',
+      file_size: '14.2 MB',
+      creator: 'LivingYuji',
+      published: true,
+      featured: false,
+      rating: 4.8,
+      downloads_count: 3200,
+      icon_bg: 'from-cyan-600 to-blue-900',
+      icon_symbol: '🎨',
+      created_at: '2026-10-21T10:00:00.000Z',
+      updated_at: '2026-10-25T12:00:00.000Z',
     },
   ],
   music_tracks: [
     {
-      id: 'track-c1',
-      title: 'Frostbite Protocol',
+      id: 'track-1',
+      title: 'Midnight Overdrive',
       artist: 'LivingYuji',
-      album: 'Christmas 2025: New Tales',
-      duration: '2:45',
-      duration_sec: 165,
-      genre: 'Cyber Lo-Fi',
-      description: 'Atmospheric winter lo-fi chords and festive midnight synth rhythms.',
-      tags: ['cyber', 'lo-fi', 'winter', 'chill'],
-      audio_url: 'https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3',
-      cover_gradient: 'from-teal-500 to-emerald-600',
+      album: 'Cybernetic Dreams',
+      duration: '3:42',
+      duration_sec: 222,
+      genre: 'Synthwave',
+      description: 'Driving basslines and nostalgic neon synths inspired by late-night terminal coding.',
+      tags: ['Synthwave', 'Cyberpunk', 'High-Energy'],
+      audio_url: '/music/cyber-overdrive.mp3',
+      cover_url: null,
+      cover_gradient: 'from-blue-900 via-indigo-950 to-slate-950',
       published: true,
       featured: true,
       track_order: 1,
       file_format: 'mp3',
-      file_size: '2.5 MB',
-      created_at: '2026-10-20T00:00:00Z',
-      updated_at: '2026-10-20T00:00:00Z',
+      file_size: '4.8 MB',
+      created_at: '2026-10-22',
+      updated_at: '2026-10-25',
     },
     {
-      id: 'track-c2',
-      title: 'Snowfall Synthwave',
+      id: 'track-2',
+      title: 'Subroutine Chill',
       artist: 'LivingYuji',
-      album: 'Christmas 2025: New Tales',
-      duration: '3:12',
-      duration_sec: 192,
-      genre: 'Synthwave',
-      description: 'Chilled pentatonic arpeggios designed for nocturnal coding sessions.',
-      tags: ['synthwave', 'arpeggio', 'chill'],
-      audio_url: 'https://assets.mixkit.co/music/preview/mixkit-cyber-punk-synth-chords-and-drums-113.mp3',
-      cover_gradient: 'from-cyan-500 to-blue-600',
+      album: 'Lo-Fi Loops Vol. 1',
+      duration: '2:15',
+      duration_sec: 135,
+      genre: 'Cyber Lo-Fi',
+      description: 'Gentle vinyl crackle layered over melodic piano chords for deep focus programming sessions.',
+      tags: ['Lo-Fi', 'Chill', 'Ambient'],
+      audio_url: '/music/lofi-loop.mp3',
+      cover_url: null,
+      cover_gradient: 'from-emerald-900 via-teal-950 to-slate-950',
       published: true,
       featured: false,
       track_order: 2,
       file_format: 'mp3',
-      file_size: '2.9 MB',
-      created_at: '2026-10-20T00:00:00Z',
-      updated_at: '2026-10-20T00:00:00Z',
-    },
-    {
-      id: 'track-f1',
-      title: 'Cyber Drift',
-      artist: 'LivingYuji',
-      album: 'Famous Songs & Soundtracks',
-      duration: '2:45',
-      duration_sec: 165,
-      genre: 'Electronic',
-      description: 'Minecraft trailer soundtrack with pulsing basslines.',
-      tags: ['soundtrack', 'trailer', 'bass'],
-      audio_url: 'https://assets.mixkit.co/music/preview/mixkit-driving-ambition-32.mp3',
-      cover_gradient: 'from-purple-500 to-indigo-600',
-      published: true,
-      featured: true,
-      track_order: 3,
-      file_format: 'mp3',
-      file_size: '2.4 MB',
-      created_at: '2026-10-21T00:00:00Z',
-      updated_at: '2026-10-21T00:00:00Z',
-    },
-    {
-      id: 'track-l1',
-      title: 'Coffee & Redstone',
-      artist: 'LivingYuji',
-      album: 'Loop 420: Infinite Beats',
-      duration: '2:55',
-      duration_sec: 175,
-      genre: 'Lo-Fi Chillhop',
-      description: 'Endless lo-fi chillhop loop for deep work and bug hunting.',
-      tags: ['lo-fi', 'beats', 'coding', 'study'],
-      audio_url: 'https://assets.mixkit.co/music/preview/mixkit-chill-bro-494.mp3',
-      cover_gradient: 'from-amber-500 to-orange-600',
-      published: true,
-      featured: false,
-      track_order: 4,
-      file_format: 'mp3',
-      file_size: '2.6 MB',
-      created_at: '2026-10-22T00:00:00Z',
-      updated_at: '2026-10-22T00:00:00Z',
+      file_size: '3.1 MB',
+      created_at: '2026-10-23',
+      updated_at: '2026-10-25',
     },
   ],
   media_assets: [
     {
-      id: 'media-logo',
-      name: 'livingyuji-emblem.svg',
-      url: '/icons/logo.svg',
-      type: 'icon',
-      size: '12 KB',
-      created_at: '2026-10-20',
-    },
-    {
-      id: 'media-favicon',
-      name: 'favicon.ico',
-      url: '/favicon.ico',
-      type: 'icon',
-      size: '15 KB',
-      created_at: '2026-10-20',
-    },
-    {
-      id: 'media-wallpaper-matrix',
-      name: 'wallpaper-matrix.png',
-      url: '/wallpapers/matrix.png',
+      id: 'asset-1',
+      name: 'Default Avatar',
+      url: '/avatar.png',
       type: 'image',
-      size: '1.4 MB',
-      created_at: '2026-10-22',
+      size: '180 KB',
+      created_at: '2026-10-20',
     },
     {
-      id: 'media-wallpaper-cyber',
-      name: 'wallpaper-cyber.png',
+      id: 'asset-2',
+      name: 'Cyberpunk Wallpaper',
       url: '/wallpapers/cyber.png',
       type: 'image',
       size: '2.1 MB',
@@ -425,12 +333,25 @@ const DEFAULT_STORE: AdminStoreData = {
   ],
 };
 
+/**
+ * Checks whether the current runtime environment has a read-only filesystem (e.g. Vercel, AWS Lambda).
+ */
+export function isServerlessReadOnlyEnvironment(): boolean {
+  return Boolean(
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NEXT_RUNTIME === 'edge' ||
+    process.env.NODE_ENV === 'production'
+  );
+}
+
 function getStoreFilePath(): string {
   return path.join(process.cwd(), 'data', 'admin-store.json');
 }
 
 /**
- * Loads the local JSON persistent storage file with automatic fallback initialization
+ * Loads baseline defaults or cached store data.
+ * Guaranteed safe on read-only serverless filesystems (/var/task).
  */
 export async function getLocalStore(): Promise<AdminStoreData> {
   const filePath = getStoreFilePath();
@@ -446,27 +367,51 @@ export async function getLocalStore(): Promise<AdminStoreData> {
       media_assets: Array.isArray(parsed.media_assets) ? parsed.media_assets : DEFAULT_STORE.media_assets,
     };
   } catch {
-    // Initialize file on disk if missing or invalid
-    try {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify(DEFAULT_STORE, null, 2), 'utf-8');
-    } catch (err) {
-      console.warn('Unable to write initial admin-store.json:', err);
+    // In local dev, initialize disk file if writable; in serverless, silently return defaults
+    if (!isServerlessReadOnlyEnvironment()) {
+      try {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, JSON.stringify(DEFAULT_STORE, null, 2), 'utf-8');
+      } catch (err: any) {
+        console.warn('Unable to write initial admin-store.json (non-fatal):', err.message);
+      }
     }
     return DEFAULT_STORE;
   }
 }
 
 /**
- * Persists updated store data to disk atomically
+ * Persists store data to local disk strictly in local development environments.
+ * Automatically bypassed in production/serverless environments to prevent EROFS.
  */
 export async function saveLocalStore(data: AdminStoreData): Promise<void> {
-  const filePath = getStoreFilePath();
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
-  const tempPath = `${filePath}.${Date.now()}.tmp`;
-  await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-  await fs.rename(tempPath, filePath);
+  if (isServerlessReadOnlyEnvironment()) {
+    return;
+  }
+  try {
+    const filePath = getStoreFilePath();
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    const tempPath = `${filePath}.${Date.now()}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+    await fs.rename(tempPath, filePath);
+  } catch (err: any) {
+    console.warn('saveLocalStore skipped (non-fatal filesystem constraint):', err.message);
+  }
+}
+
+/**
+ * Updates the local development mirror only when not in a read-only environment.
+ */
+async function syncLocalStoreIfDev(updater: (store: AdminStoreData) => void): Promise<void> {
+  if (isServerlessReadOnlyEnvironment()) return;
+  try {
+    const local = await getLocalStore();
+    updater(local);
+    await saveLocalStore(local);
+  } catch {
+    // Non-fatal mirror update in dev
+  }
 }
 
 // ====================================================================
@@ -492,9 +437,69 @@ export async function getSiteSettings(): Promise<{ settings: SiteSettingsRecord;
 
 export async function saveSiteSettings(updates: Partial<SiteSettingsRecord>): Promise<{
   settings: SiteSettingsRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const current = await getSiteSettings();
+    const merged: SiteSettingsRecord = {
+      ...current.settings,
+      ...updates,
+      id: 'default',
+      updated_at: new Date().toISOString(),
+    };
+
+    // 1. Attempt full schema upsert
+    const { data, error } = await supabase.from('site_settings').upsert(merged).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        store.site_settings = data;
+      });
+      return { settings: data, destination: 'supabase_production' };
+    }
+
+    // 2. If column not found (e.g. PGRST204 for unmigrated video wallpaper columns), retry with base schema columns
+    if (error && error.code === 'PGRST204') {
+      const basePayload = {
+        id: 'default',
+        brand_name: merged.brand_name,
+        site_title: merged.site_title,
+        wallpaper: merged.wallpaper,
+        accent_color: merged.accent_color,
+        theme: merged.theme,
+        custom_logo_url: merged.custom_logo_url || null,
+        custom_favicon_url: merged.custom_favicon_url || null,
+        custom_wallpaper_url: merged.custom_video_wallpaper_url || merged.custom_wallpaper_url || null,
+        updated_at: merged.updated_at,
+      };
+
+      const retryRes = await supabase.from('site_settings').upsert(basePayload).select().single();
+      if (!retryRes.error && retryRes.data) {
+        const combinedSettings: SiteSettingsRecord = {
+          ...merged,
+          ...retryRes.data,
+        };
+        await syncLocalStoreIfDev((store) => {
+          store.site_settings = combinedSettings;
+        });
+        return {
+          settings: combinedSettings,
+          destination: 'supabase_production',
+          warning:
+            'Settings saved to Supabase. To persist dedicated video wallpaper columns in the cloud database, run migration 20261025_complete_setup.sql.',
+        };
+      }
+      throw new Error(`Database error saving site settings: ${retryRes.error?.message || 'Unknown database retry error'}`);
+    }
+
+    throw new Error(`Database error saving site settings: ${error?.message || 'Unknown database error'}`);
+  }
+
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
   const local = await getLocalStore();
   const merged: SiteSettingsRecord = {
     ...local.site_settings,
@@ -502,33 +507,8 @@ export async function saveSiteSettings(updates: Partial<SiteSettingsRecord>): Pr
     id: 'default',
     updated_at: new Date().toISOString(),
   };
-
-  // Always persist locally
   local.site_settings = merged;
   await saveLocalStore(local);
-
-  // Attempt Supabase sync if service client is available
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('site_settings').upsert(merged).select().single();
-      if (!error && data) {
-        return { settings: data, destination: 'supabase_and_local' };
-      }
-      return {
-        settings: merged,
-        destination: 'local_persistent',
-        warning: `Saved locally. Supabase error: ${error?.message || 'Unknown'}`,
-      };
-    }
-  } catch (err: any) {
-    return {
-      settings: merged,
-      destination: 'local_persistent',
-      warning: `Saved locally. Cloud service error: ${err.message}`,
-    };
-  }
-
   return { settings: merged, destination: 'local_persistent' };
 }
 
@@ -555,9 +535,34 @@ export async function getDiscordSettings(): Promise<{ settings: DiscordSettingsR
 
 export async function saveDiscordSettings(updates: Partial<DiscordSettingsRecord>): Promise<{
   settings: DiscordSettingsRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const current = await getDiscordSettings();
+    const merged: DiscordSettingsRecord = {
+      ...current.settings,
+      ...updates,
+      id: 'default',
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase.from('discord_settings').upsert(merged).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        store.discord_settings = data;
+      });
+      return { settings: data, destination: 'supabase_production' };
+    }
+
+    throw new Error(`Database error saving Discord settings: ${error?.message || 'Unknown database error'}`);
+  }
+
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
   const local = await getLocalStore();
   const merged: DiscordSettingsRecord = {
     ...local.discord_settings,
@@ -565,31 +570,8 @@ export async function saveDiscordSettings(updates: Partial<DiscordSettingsRecord
     id: 'default',
     updated_at: new Date().toISOString(),
   };
-
   local.discord_settings = merged;
   await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('discord_settings').upsert(merged).select().single();
-      if (!error && data) {
-        return { settings: data, destination: 'supabase_and_local' };
-      }
-      return {
-        settings: merged,
-        destination: 'local_persistent',
-        warning: `Saved locally. Supabase error: ${error?.message || 'Unknown'}`,
-      };
-    }
-  } catch (err: any) {
-    return {
-      settings: merged,
-      destination: 'local_persistent',
-      warning: `Saved locally. Cloud service error: ${err.message}`,
-    };
-  }
-
   return { settings: merged, destination: 'local_persistent' };
 }
 
@@ -616,16 +598,15 @@ export async function getShowcaseProjects(): Promise<{ projects: ShowcaseProject
 
 export async function saveShowcaseProject(project: Partial<ShowcaseProjectRecord>): Promise<{
   project: ShowcaseProjectRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const local = await getLocalStore();
   const id = project.id || `proj-${Date.now()}`;
   const now = new Date().toISOString();
 
   const record: ShowcaseProjectRecord = {
     id,
-    title: project.title || 'Untitled Project',
+    title: (project.title || 'Untitled Project').trim(),
     slug:
       project.slug ||
       (project.title || 'untitled')
@@ -653,52 +634,52 @@ export async function saveShowcaseProject(project: Partial<ShowcaseProjectRecord
     updated_at: now,
   };
 
-  const existingIdx = local.showcase_projects.findIndex((p) => p.id === id);
-  if (existingIdx >= 0) {
-    local.showcase_projects[existingIdx] = record;
-  } else {
-    local.showcase_projects.unshift(record);
-  }
-  await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('showcase_projects').upsert(record).select().single();
-      if (!error && data) {
-        return { project: data, destination: 'supabase_and_local' };
-      }
-      return {
-        project: record,
-        destination: 'local_persistent',
-        warning: `Saved locally. Supabase error: ${error?.message || 'Unknown'}`,
-      };
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { data, error } = await supabase.from('showcase_projects').upsert(record).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        const idx = store.showcase_projects.findIndex((p) => p.id === id);
+        if (idx >= 0) store.showcase_projects[idx] = data;
+        else store.showcase_projects.unshift(data);
+      });
+      return { project: data, destination: 'supabase_production' };
     }
-  } catch (err: any) {
-    return {
-      project: record,
-      destination: 'local_persistent',
-      warning: `Saved locally. Cloud service error: ${err.message}`,
-    };
+    throw new Error(`Database error saving showcase project: ${error?.message || 'Unknown database error'}`);
   }
 
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
+  const local = await getLocalStore();
+  const existingIdx = local.showcase_projects.findIndex((p) => p.id === id);
+  if (existingIdx >= 0) local.showcase_projects[existingIdx] = record;
+  else local.showcase_projects.unshift(record);
+  await saveLocalStore(local);
   return { project: record, destination: 'local_persistent' };
 }
 
 export async function deleteShowcaseProject(id: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { error } = await supabase.from('showcase_projects').delete().eq('id', id);
+    if (error) {
+      throw new Error(`Database error deleting showcase project: ${error.message}`);
+    }
+    await syncLocalStoreIfDev((store) => {
+      store.showcase_projects = store.showcase_projects.filter((p) => p.id !== id);
+    });
+    return { success: true };
+  }
+
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
   const local = await getLocalStore();
   local.showcase_projects = local.showcase_projects.filter((p) => p.id !== id);
   await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      await supabase.from('showcase_projects').delete().eq('id', id);
-    }
-  } catch (err: any) {
-    console.warn('Supabase deleteShowcaseProject error:', err.message);
-  }
-
   return { success: true };
 }
 
@@ -725,10 +706,9 @@ export async function getMinecraftProducts(): Promise<{ products: MinecraftProdu
 
 export async function saveMinecraftProduct(product: Partial<MinecraftProductRecord>): Promise<{
   product: MinecraftProductRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const local = await getLocalStore();
   const id = product.id || `prod-${Date.now()}`;
   const now = new Date().toISOString();
 
@@ -749,7 +729,7 @@ export async function saveMinecraftProduct(product: Partial<MinecraftProductReco
     installation_steps: Array.isArray(product.installation_steps) ? product.installation_steps : [],
     changelog: product.changelog || '',
     file_format: product.file_format || '.jar',
-    file_size: product.file_size || '1 MB',
+    file_size: product.file_size || '1.0 MB',
     creator: product.creator || 'LivingYuji',
     published: product.published !== false,
     featured: product.featured === true,
@@ -763,52 +743,52 @@ export async function saveMinecraftProduct(product: Partial<MinecraftProductReco
     updated_at: now,
   };
 
-  const existingIdx = local.minecraft_products.findIndex((p) => p.id === id);
-  if (existingIdx >= 0) {
-    local.minecraft_products[existingIdx] = record;
-  } else {
-    local.minecraft_products.unshift(record);
-  }
-  await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('minecraft_products').upsert(record).select().single();
-      if (!error && data) {
-        return { product: data, destination: 'supabase_and_local' };
-      }
-      return {
-        product: record,
-        destination: 'local_persistent',
-        warning: `Saved locally. Supabase error: ${error?.message || 'Unknown'}`,
-      };
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { data, error } = await supabase.from('minecraft_products').upsert(record).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        const idx = store.minecraft_products.findIndex((p) => p.id === id);
+        if (idx >= 0) store.minecraft_products[idx] = data;
+        else store.minecraft_products.unshift(data);
+      });
+      return { product: data, destination: 'supabase_production' };
     }
-  } catch (err: any) {
-    return {
-      product: record,
-      destination: 'local_persistent',
-      warning: `Saved locally. Cloud service error: ${err.message}`,
-    };
+    throw new Error(`Database error saving Minecraft product: ${error?.message || 'Unknown database error'}`);
   }
 
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
+  const local = await getLocalStore();
+  const existingIdx = local.minecraft_products.findIndex((p) => p.id === id);
+  if (existingIdx >= 0) local.minecraft_products[existingIdx] = record;
+  else local.minecraft_products.unshift(record);
+  await saveLocalStore(local);
   return { product: record, destination: 'local_persistent' };
 }
 
 export async function deleteMinecraftProduct(id: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { error } = await supabase.from('minecraft_products').delete().eq('id', id);
+    if (error) {
+      throw new Error(`Database error deleting Minecraft product: ${error.message}`);
+    }
+    await syncLocalStoreIfDev((store) => {
+      store.minecraft_products = store.minecraft_products.filter((p) => p.id !== id);
+    });
+    return { success: true };
+  }
+
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
   const local = await getLocalStore();
   local.minecraft_products = local.minecraft_products.filter((p) => p.id !== id);
   await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      await supabase.from('minecraft_products').delete().eq('id', id);
-    }
-  } catch (err: any) {
-    console.warn('Supabase deleteMinecraftProduct error:', err.message);
-  }
-
   return { success: true };
 }
 
@@ -840,10 +820,9 @@ export async function getMusicTracks(isAdmin: boolean): Promise<{ tracks: MusicT
 
 export async function saveMusicTrack(track: Partial<MusicTrackRecord>): Promise<{
   track: MusicTrackRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const local = await getLocalStore();
   const id = track.id || `track-${Date.now()}`;
   const now = new Date().toISOString();
 
@@ -869,98 +848,104 @@ export async function saveMusicTrack(track: Partial<MusicTrackRecord>): Promise<
     updated_at: now,
   };
 
-  const existingIdx = local.music_tracks.findIndex((t) => t.id === id);
-  if (existingIdx >= 0) {
-    local.music_tracks[existingIdx] = record;
-  } else {
-    local.music_tracks.push(record);
-  }
-  await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('music_tracks').upsert(record).select().single();
-      if (!error && data) {
-        return { track: data, destination: 'supabase_and_local' };
-      }
-      return {
-        track: record,
-        destination: 'local_persistent',
-        warning: `Saved locally. Supabase error: ${error?.message || 'Unknown'}`,
-      };
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { data, error } = await supabase.from('music_tracks').upsert(record).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        const idx = store.music_tracks.findIndex((t) => t.id === id);
+        if (idx >= 0) store.music_tracks[idx] = data;
+        else store.music_tracks.push(data);
+      });
+      return { track: data, destination: 'supabase_production' };
     }
-  } catch (err: any) {
-    return {
-      track: record,
-      destination: 'local_persistent',
-      warning: `Saved locally. Cloud service error: ${err.message}`,
-    };
+
+    if (error && error.code === 'PGRST205') {
+      throw new Error(
+        `Database table 'public.music_tracks' does not exist in Supabase. Please run the SQL migration 'supabase/migrations/20261025_complete_setup.sql' in your Supabase SQL Editor to enable durable cloud music storage.`
+      );
+    }
+
+    throw new Error(`Database error saving music track: ${error?.message || 'Unknown database error'}`);
   }
 
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
+  const local = await getLocalStore();
+  const existingIdx = local.music_tracks.findIndex((t) => t.id === id);
+  if (existingIdx >= 0) local.music_tracks[existingIdx] = record;
+  else local.music_tracks.push(record);
+  await saveLocalStore(local);
   return { track: record, destination: 'local_persistent' };
 }
 
 export async function updateMusicTrack(id: string, updates: Partial<MusicTrackRecord>): Promise<{
   track: MusicTrackRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const local = await getLocalStore();
-  const existing = local.music_tracks.find((t) => t.id === id);
-  if (!existing) {
-    throw new Error(`Track ${id} not found`);
-  }
-
-  const merged: MusicTrackRecord = {
-    ...existing,
+  const merged: Partial<MusicTrackRecord> = {
     ...updates,
     id,
     updated_at: new Date().toISOString(),
   };
 
-  const idx = local.music_tracks.findIndex((t) => t.id === id);
-  local.music_tracks[idx] = merged;
-  await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('music_tracks').update(merged).eq('id', id).select().single();
-      if (!error && data) {
-        return { track: data, destination: 'supabase_and_local' };
-      }
-      return {
-        track: merged,
-        destination: 'local_persistent',
-        warning: `Updated locally. Supabase error: ${error?.message || 'Unknown'}`,
-      };
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { data, error } = await supabase.from('music_tracks').update(merged).eq('id', id).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        const idx = store.music_tracks.findIndex((t) => t.id === id);
+        if (idx >= 0) store.music_tracks[idx] = { ...store.music_tracks[idx], ...data };
+      });
+      return { track: data, destination: 'supabase_production' };
     }
-  } catch (err: any) {
-    return {
-      track: merged,
-      destination: 'local_persistent',
-      warning: `Updated locally. Cloud service error: ${err.message}`,
-    };
+    throw new Error(`Database error updating music track: ${error?.message || 'Unknown database error'}`);
   }
 
-  return { track: merged, destination: 'local_persistent' };
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
+  const local = await getLocalStore();
+  const existing = local.music_tracks.find((t) => t.id === id);
+  if (!existing) {
+    throw new Error(`Track ${id} not found`);
+  }
+  const updatedTrack: MusicTrackRecord = {
+    ...existing,
+    ...updates,
+    id,
+    updated_at: new Date().toISOString(),
+  };
+  const idx = local.music_tracks.findIndex((t) => t.id === id);
+  local.music_tracks[idx] = updatedTrack;
+  await saveLocalStore(local);
+  return { track: updatedTrack, destination: 'local_persistent' };
 }
 
 export async function deleteMusicTrack(id: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { error } = await supabase.from('music_tracks').delete().eq('id', id);
+    if (error) {
+      throw new Error(`Database error deleting music track: ${error.message}`);
+    }
+    await syncLocalStoreIfDev((store) => {
+      store.music_tracks = store.music_tracks.filter((t) => t.id !== id);
+    });
+    return { success: true };
+  }
+
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
   const local = await getLocalStore();
   local.music_tracks = local.music_tracks.filter((t) => t.id !== id);
   await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      await supabase.from('music_tracks').delete().eq('id', id);
-    }
-  } catch (err: any) {
-    console.warn('Supabase deleteMusicTrack error:', err.message);
-  }
-
   return { success: true };
 }
 
@@ -978,7 +963,7 @@ export async function getMediaAssets(): Promise<{ assets: MediaAssetRecord[]; so
           assets: data.map((d) => ({
             id: d.id,
             name: d.name,
-            url: d.public_url || d.url,
+            url: d.public_url || d.url || d.storage_path,
             type: d.file_type || d.type || 'image',
             size: d.size || 'Static',
             created_at: d.created_at,
@@ -997,10 +982,9 @@ export async function getMediaAssets(): Promise<{ assets: MediaAssetRecord[]; so
 
 export async function saveMediaAsset(asset: Partial<MediaAssetRecord>): Promise<{
   asset: MediaAssetRecord;
-  destination: 'supabase_and_local' | 'local_persistent';
+  destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const local = await getLocalStore();
   const id = asset.id || `media-${Date.now()}`;
   const now = new Date().toISOString();
 
@@ -1013,51 +997,61 @@ export async function saveMediaAsset(asset: Partial<MediaAssetRecord>): Promise<
     created_at: asset.created_at || now.split('T')[0],
   };
 
-  const existingIdx = local.media_assets.findIndex((a) => a.id === id);
-  if (existingIdx >= 0) {
-    local.media_assets[existingIdx] = record;
-  } else {
-    local.media_assets.unshift(record);
-  }
-  await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      const payload = {
-        id: record.id,
-        name: record.name,
-        file_type: record.type,
-        size_bytes: 1024,
-        storage_path: record.url,
-        public_url: record.url,
-        created_at: now,
-      };
-      const { data, error } = await supabase.from('media_library').upsert(payload).select().single();
-      if (!error && data) {
-        return { asset: record, destination: 'supabase_and_local' };
-      }
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const payload = {
+      id: record.id,
+      name: record.name,
+      file_type: record.type,
+      size_bytes: 1024,
+      storage_path: record.url,
+      public_url: record.url,
+      category: 'general',
+      created_at: now,
+    };
+    const { data, error } = await supabase.from('media_library').upsert(payload).select().single();
+    if (!error && data) {
+      await syncLocalStoreIfDev((store) => {
+        const idx = store.media_assets.findIndex((a) => a.id === id);
+        if (idx >= 0) store.media_assets[idx] = record;
+        else store.media_assets.unshift(record);
+      });
+      return { asset: record, destination: 'supabase_production' };
     }
-  } catch (err: any) {
-    console.warn('Supabase saveMediaAsset error:', err.message);
+    throw new Error(`Database error saving media asset: ${error?.message || 'Unknown database error'}`);
   }
 
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
+  const local = await getLocalStore();
+  const existingIdx = local.media_assets.findIndex((a) => a.id === id);
+  if (existingIdx >= 0) local.media_assets[existingIdx] = record;
+  else local.media_assets.unshift(record);
+  await saveLocalStore(local);
   return { asset: record, destination: 'local_persistent' };
 }
 
 export async function deleteMediaAsset(id: string): Promise<{ success: boolean }> {
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { error } = await supabase.from('media_library').delete().eq('id', id);
+    if (error) {
+      throw new Error(`Database error deleting media asset: ${error.message}`);
+    }
+    await syncLocalStoreIfDev((store) => {
+      store.media_assets = store.media_assets.filter((a) => a.id !== id);
+    });
+    return { success: true };
+  }
+
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error('Database connection is not configured in this production environment.');
+  }
+
   const local = await getLocalStore();
   local.media_assets = local.media_assets.filter((a) => a.id !== id);
   await saveLocalStore(local);
-
-  try {
-    const supabase = await createServiceClient();
-    if (supabase) {
-      await supabase.from('media_library').delete().eq('id', id);
-    }
-  } catch (err: any) {
-    console.warn('Supabase deleteMediaAsset error:', err.message);
-  }
-
   return { success: true };
 }
