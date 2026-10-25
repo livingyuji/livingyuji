@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --color-primary: #1686DC;
+  --color-deep: #173651;
+  --color-surface: #FFFFFF;
+  --color-soft-bg: #F4F9FD;
+  --color-border: #DCE8F1;
+  --color-secondary: #61758A;
+  --taskbar-height: 48px;
+  --dock-height: 80px;
+  --status-bar-height: 28px;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-top: env(safe-area-inset-top, 0px);
+}
+
+.dark {
+  --color-primary: #3B9EE8;
+  --color-deep: #E2EDF5;
+  --color-surface: #1A2332;
+  --color-soft-bg: #111827;
+  --color-border: #2A3A4A;
+  --color-secondary: #94A3B8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+/* OS Desktop prevents body scroll */
+.os-desktop {
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Allow select inside app windows */
+.app-content {
+  user-select: text;
+}
+
+/* Window resize handles */
+.resize-handle {
+  position: absolute;
+  z-index: 1;
+}
+
+.resize-handle-n { top: 0; left: 8px; right: 8px; height: 4px; cursor: n-resize; }
+.resize-handle-s { bottom: 0; left: 8px; right: 8px; height: 4px; cursor: s-resize; }
+.resize-handle-e { right: 0; top: 8px; bottom: 8px; width: 4px; cursor: e-resize; }
+.resize-handle-w { left: 0; top: 8px; bottom: 8px; width: 4px; cursor: w-resize; }
+.resize-handle-ne { top: 0; right: 0; width: 12px; height: 12px; cursor: ne-resize; }
+.resize-handle-nw { top: 0; left: 0; width: 12px; height: 12px; cursor: nw-resize; }
+.resize-handle-se { bottom: 0; right: 0; width: 12px; height: 12px; cursor: se-resize; }
+.resize-handle-sw { bottom: 0; left: 0; width: 12px; height: 12px; cursor: sw-resize; }
+
+/* Scrollable content inside windows */
+.window-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(22, 134, 220, 0.3) transparent;
+}
+
+.window-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.window-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.window-scroll::-webkit-scrollbar-thumb {
+  background: rgba(22, 134, 220, 0.3);
+  border-radius: 3px;
+}
+
+.window-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(22, 134, 220, 0.5);
+}
+
+/* Desktop icon grid */
+.desktop-icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 80px);
+  gap: 8px;
+  padding: 16px;
+  align-content: start;
+}
+
+/* Taskbar glass effect */
+.taskbar-glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-top: 1px solid rgba(220, 232, 241, 0.8);
+}
+
+.dark .taskbar-glass {
+  background: rgba(26, 35, 50, 0.9);
+  border-top: 1px solid rgba(42, 58, 74, 0.8);
+}
+
+/* Window glass */
+.window-glass {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dark .window-glass {
+  background: rgba(26, 35, 50, 0.95);
+}
+
+/* Mobile dock glass */
+.dock-glass {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(220, 232, 241, 0.5);
+}
+
+.dark .dock-glass {
+  background: rgba(26, 35, 50, 0.8);
+  border: 1px solid rgba(42, 58, 74, 0.5);
+}
+
+/* Smooth transitions globally */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-window-open { animation: windowOpen 0.2s ease-out; }
+  .animate-window-close { animation: windowClose 0.15s ease-in; }
+  .animate-app-open { animation: appOpen 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .animate-launcher-open { animation: launcherOpen 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus indicators */
+:focus-visible {
+  outline: 2px solid #1686DC;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Wallpaper gradients */
+.wallpaper-default {
+  background: linear-gradient(135deg, #EBF5FC 0%, #D0E9F8 30%, #F4F9FD 60%, #E8F2FA 100%);
+}
+
+.wallpaper-dark {
+  background: linear-gradient(135deg, #0F172A 0%, #1A2332 30%, #0D1B2A 60%, #111827 100%);
+}
+
+.wallpaper-sunset {
+  background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 20%, #FDE68A 60%, #FEF3C7 100%);
+}
+
+.wallpaper-forest {
+  background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 30%, #ECFDF5 60%, #F0FDF4 100%);
+}
+
+.wallpaper-ocean {
+  background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 20%, #1686DC 50%, #0369A1 100%);
+}
+
+/* Mobile safe areas */
+.safe-top { padding-top: env(safe-area-inset-top, 0px); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-left { padding-left: env(safe-area-inset-left, 0px); }
+.safe-right { padding-right: env(safe-area-inset-right, 0px); }
+
+/* Terminal styles */
+.terminal-text {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Prevent text selection during drag */
+.dragging * {
+  user-select: none !important;
+  pointer-events: none;
+}
+
+/* App icon hover */
+.app-icon-btn {
+  transition: transform 0.15s ease;
+}
+.app-icon-btn:hover {
+  transform: scale(1.08);
+}
+.app-icon-btn:active {
+  transform: scale(0.95);
+}

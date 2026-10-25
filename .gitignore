@@ -1,0 +1,47 @@
+# ====================================================================
+# LivingYuji OS — Git Ignore Rules
+# ====================================================================
+
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Next.js Build Outputs
+.next/
+out/
+build/
+dist/
+
+# TypeScript Cache
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment Files (Ignore ALL .env files, but keep .env.example)
+.env*
+!.env.example
+
+# Debug and System Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Scratch, Temporary & Debug Directories
+scratch/
+.tmp/
+tmp/
+
+# OS and Editor Specific Files
+.DS_Store
+Thumbs.db
+*.pem
+*.key
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
