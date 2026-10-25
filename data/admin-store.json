@@ -1,0 +1,342 @@
+{
+  "site_settings": {
+    "id": "default",
+    "brand_name": "LivingYuji Test Brand",
+    "site_title": "LivingYuji Test OS Title",
+    "wallpaper": "cyber",
+    "accent_color": "#0078D4",
+    "theme": "dark",
+    "custom_logo_url": "/avatar.png",
+    "custom_favicon_url": "/favicon.png",
+    "custom_wallpaper_url": null,
+    "custom_video_wallpaper_url": null,
+    "video_wallpaper_muted": true,
+    "wallpaper_mode": "cover",
+    "wallpaper_opacity": 85,
+    "updated_at": "2026-10-25T17:17:31.943Z"
+  },
+  "discord_settings": {
+    "id": "default",
+    "main_server_url": "https://discord.gg/livingyuji-test",
+    "purchase_support_url": "https://discord.gg/livingyuji",
+    "minecraft_products_url": "https://discord.gg/livingyuji",
+    "web_development_url": "https://discord.gg/livingyuji",
+    "discord_bots_url": "https://discord.gg/livingyuji",
+    "server_setups_url": "https://discord.gg/livingyuji",
+    "resource_packs_url": "https://discord.gg/livingyuji",
+    "fallback_url": "https://discord.gg/livingyuji",
+    "button_label_store": "Order via Discord",
+    "button_label_minecraft": "Get on Discord Now",
+    "button_label_services": "Inquire on Discord",
+    "purchase_instructions": "1. Join the LivingYuji Discord server.\n2. Navigate to the #orders or #tickets channel.\n3. Mention the product code or name to open an order ticket.\n4. LivingYuji or our automated assistant will verify payment & deliver your asset instantly.",
+    "updated_at": "2026-10-25T17:17:32.005Z"
+  },
+  "showcase_projects": [
+    {
+      "id": "proj-livingyuji-os",
+      "title": "LivingYuji OS",
+      "slug": "livingyuji-os",
+      "category_id": "web-apps",
+      "summary": "Browser-based Windows desktop operating system, portfolio and media workspace.",
+      "description": "LivingYuji OS is an interactive web desktop operating system built with Next.js 14, React 18, and TypeScript. Features a window manager with drag, resize, maximize/minimize, a virtual NTFS filesystem with C: and D: drives, text viewer, Paint canvas, digital stores, matrix background synthesizers, and seamless Discord purchasing coordination.",
+      "features": [
+        "Interactive Windows 11 window manager with boundary clamping & Z-index stacking",
+        "Virtual NTFS File System supporting C: and D: drives",
+        "Built-in Document Viewer with safe link detection",
+        "Admin control console with Supabase cloud synchronisation & persistent local storage",
+        "Matrix rain phosphor canvas & synthesizer workstation"
+      ],
+      "technologies": [
+        "Next.js 14",
+        "React 18",
+        "TypeScript",
+        "Tailwind CSS",
+        "Zustand",
+        "Supabase"
+      ],
+      "status": "Released",
+      "featured": true,
+      "is_free": true,
+      "price": 0,
+      "version": "v2.5",
+      "gradient_bg": "from-blue-600 via-sky-700 to-indigo-900",
+      "icon_symbol": "💻",
+      "links": {
+        "liveDemo": "https://livingyuji.com",
+        "github": "https://github.com/livingyuji/livingyuji"
+      },
+      "screenshots": [
+        "/screenshots/desktop.png"
+      ],
+      "created_at": "2026-10-25T00:00:00Z",
+      "updated_at": "2026-10-25T00:00:00Z"
+    },
+    {
+      "id": "proj-arcane-arsenal",
+      "title": "ArcaneArsenal — Magical Weapons Engine",
+      "slug": "arcane-arsenal",
+      "category_id": "mc-plugins",
+      "summary": "Production-grade custom weapon framework with 10+ arcane items, particle raycasting & sound FX.",
+      "description": "ArcaneArsenal is a high-performance custom weapon system built for Paper and Purpur servers. Features 10+ mythical weapons with raycasted particle beams, sound FX, cooldown management, and complete CustomModelData support for resource packs.",
+      "features": [
+        "10+ unique weapons (Voidwalker Scythe, Sunfire Blade, Tempest Bow, etc.)",
+        "Zero-lag asynchronous particle raycasting math",
+        "Full CustomModelData compatibility for 3D resource packs",
+        "YAML configuration for damage, cooldowns, and sound pitches",
+        "Paper & Purpur 1.21.4 native compatibility"
+      ],
+      "technologies": [
+        "Java 21",
+        "PaperMC API",
+        "Purpur API",
+        "CustomModelData",
+        "YAML"
+      ],
+      "status": "Released",
+      "featured": true,
+      "is_free": true,
+      "price": 0,
+      "version": "v1.4.2",
+      "gradient_bg": "from-purple-700 via-indigo-800 to-slate-900",
+      "icon_symbol": "⚔️",
+      "links": {
+        "github": "https://github.com/livingyuji/livingyuji"
+      },
+      "screenshots": [],
+      "created_at": "2026-10-25T00:00:00Z",
+      "updated_at": "2026-10-25T00:00:00Z"
+    }
+  ],
+  "minecraft_products": [
+    {
+      "id": "prod-arcane-arsenal",
+      "name": "ArcaneArsenal — Magical Weapons Engine",
+      "category": "weapons",
+      "category_name": "Custom Weapons & Abilities",
+      "short_desc": "10+ arcane weapons with particle rays, sound design & custom model data integration.",
+      "full_desc": "ArcaneArsenal is a production-grade custom weapon system built for Paper and Purpur servers. Features 10+ mythical weapons with raycasted particle beams, sound FX, cooldown management, and complete CustomModelData support for resource packs.",
+      "price": 0,
+      "is_free": true,
+      "version": "v1.4.2",
+      "mc_versions": [
+        "1.21.4",
+        "1.21.1",
+        "1.20.4"
+      ],
+      "server_software": [
+        "Purpur",
+        "Paper",
+        "Folia"
+      ],
+      "dependencies": [
+        "ProtocolLib",
+        "PlaceholderAPI (Optional)"
+      ],
+      "features": [
+        "10+ mythical weapons (Solar Bow, Void Blade, Storm Wand, Arcane Scythe)",
+        "Raycast projectile physics and particle trail effects",
+        "Configurable mana, cooldowns, and damage multipliers",
+        "Custom Model Data integration ready"
+      ],
+      "installation_steps": [
+        "Download ArcaneArsenal-v1.4.2.jar",
+        "Place into plugins/ directory",
+        "Restart server"
+      ],
+      "changelog": "v1.4.2 — Added Paper 1.21.4 support.",
+      "file_format": ".jar",
+      "file_size": "412 KB",
+      "creator": "LivingYuji",
+      "published": true,
+      "featured": true,
+      "rating": 5,
+      "downloads_count": 1420,
+      "icon_bg": "from-indigo-600 to-purple-800",
+      "icon_symbol": "⚔️",
+      "download_url": "https://discord.gg/livingyuji",
+      "created_at": "2026-10-25T00:00:00Z",
+      "updated_at": "2026-10-25T00:00:00Z"
+    },
+    {
+      "id": "prod-vanta-combat",
+      "name": "VantaCombat — High-Tickrate PvP Suite",
+      "category": "plugins",
+      "category_name": "Plugins",
+      "short_desc": "Instant hit registration, smooth knockback tuning & anti-combat log system.",
+      "full_desc": "VantaCombat re-engineers melee and projectile combat for high-stakes PvP servers. Eliminates missed hit-ticks, offers custom knockback profiles, action-bar combat tagging, and graceful combat logging protection.",
+      "price": 0,
+      "is_free": true,
+      "version": "v2.1.0",
+      "mc_versions": [
+        "1.21.4",
+        "1.21.1",
+        "1.20.4",
+        "1.19.4"
+      ],
+      "server_software": [
+        "Purpur",
+        "Paper",
+        "Velocity"
+      ],
+      "dependencies": [
+        "None (Self-contained)"
+      ],
+      "features": [
+        "Zero-delay hit registration pipeline",
+        "Custom knockback physics (horizontal, vertical multipliers)",
+        "Action-bar combat tagging timer"
+      ],
+      "installation_steps": [
+        "Download VantaCombat-v2.1.0.jar",
+        "Put in /plugins directory and restart server"
+      ],
+      "changelog": "v2.1.0 — 1.21.4 update with sound feedback.",
+      "file_format": ".jar",
+      "file_size": "320 KB",
+      "creator": "LivingYuji",
+      "published": true,
+      "featured": true,
+      "rating": 4.9,
+      "downloads_count": 890,
+      "icon_bg": "from-blue-600 to-cyan-800",
+      "icon_symbol": "⚡",
+      "download_url": "https://discord.gg/livingyuji",
+      "created_at": "2026-10-25T00:00:00Z",
+      "updated_at": "2026-10-25T00:00:00Z"
+    }
+  ],
+  "music_tracks": [
+    {
+      "id": "track-c1",
+      "title": "Frostbite Protocol",
+      "artist": "LivingYuji",
+      "album": "Christmas 2025: New Tales",
+      "duration": "2:45",
+      "duration_sec": 165,
+      "genre": "Cyber Lo-Fi",
+      "description": "Atmospheric winter lo-fi chords and festive midnight synth rhythms.",
+      "tags": [
+        "cyber",
+        "lo-fi",
+        "winter",
+        "chill"
+      ],
+      "audio_url": "https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3",
+      "cover_gradient": "from-teal-500 to-emerald-600",
+      "published": true,
+      "featured": true,
+      "track_order": 1,
+      "file_format": "mp3",
+      "file_size": "2.5 MB",
+      "created_at": "2026-10-20T00:00:00Z",
+      "updated_at": "2026-10-20T00:00:00Z"
+    },
+    {
+      "id": "track-c2",
+      "title": "Snowfall Synthwave",
+      "artist": "LivingYuji",
+      "album": "Christmas 2025: New Tales",
+      "duration": "3:12",
+      "duration_sec": 192,
+      "genre": "Synthwave",
+      "description": "Chilled pentatonic arpeggios designed for nocturnal coding sessions.",
+      "tags": [
+        "synthwave",
+        "arpeggio",
+        "chill"
+      ],
+      "audio_url": "https://assets.mixkit.co/music/preview/mixkit-cyber-punk-synth-chords-and-drums-113.mp3",
+      "cover_gradient": "from-cyan-500 to-blue-600",
+      "published": true,
+      "featured": false,
+      "track_order": 2,
+      "file_format": "mp3",
+      "file_size": "2.9 MB",
+      "created_at": "2026-10-20T00:00:00Z",
+      "updated_at": "2026-10-20T00:00:00Z"
+    },
+    {
+      "id": "track-f1",
+      "title": "Cyber Drift",
+      "artist": "LivingYuji",
+      "album": "Famous Songs & Soundtracks",
+      "duration": "2:45",
+      "duration_sec": 165,
+      "genre": "Electronic",
+      "description": "Minecraft trailer soundtrack with pulsing basslines.",
+      "tags": [
+        "soundtrack",
+        "trailer",
+        "bass"
+      ],
+      "audio_url": "https://assets.mixkit.co/music/preview/mixkit-driving-ambition-32.mp3",
+      "cover_gradient": "from-purple-500 to-indigo-600",
+      "published": true,
+      "featured": true,
+      "track_order": 3,
+      "file_format": "mp3",
+      "file_size": "2.4 MB",
+      "created_at": "2026-10-21T00:00:00Z",
+      "updated_at": "2026-10-21T00:00:00Z"
+    },
+    {
+      "id": "track-l1",
+      "title": "Coffee & Redstone",
+      "artist": "LivingYuji",
+      "album": "Loop 420: Infinite Beats",
+      "duration": "2:55",
+      "duration_sec": 175,
+      "genre": "Lo-Fi Chillhop",
+      "description": "Endless lo-fi chillhop loop for deep work and bug hunting.",
+      "tags": [
+        "lo-fi",
+        "beats",
+        "coding",
+        "study"
+      ],
+      "audio_url": "https://assets.mixkit.co/music/preview/mixkit-chill-bro-494.mp3",
+      "cover_gradient": "from-amber-500 to-orange-600",
+      "published": true,
+      "featured": false,
+      "track_order": 4,
+      "file_format": "mp3",
+      "file_size": "2.6 MB",
+      "created_at": "2026-10-22T00:00:00Z",
+      "updated_at": "2026-10-22T00:00:00Z"
+    }
+  ],
+  "media_assets": [
+    {
+      "id": "media-logo",
+      "name": "livingyuji-emblem.svg",
+      "url": "/icons/logo.svg",
+      "type": "icon",
+      "size": "12 KB",
+      "created_at": "2026-10-20"
+    },
+    {
+      "id": "media-favicon",
+      "name": "favicon.ico",
+      "url": "/favicon.ico",
+      "type": "icon",
+      "size": "15 KB",
+      "created_at": "2026-10-20"
+    },
+    {
+      "id": "media-wallpaper-matrix",
+      "name": "wallpaper-matrix.png",
+      "url": "/wallpapers/matrix.png",
+      "type": "image",
+      "size": "1.4 MB",
+      "created_at": "2026-10-22"
+    },
+    {
+      "id": "media-wallpaper-cyber",
+      "name": "wallpaper-cyber.png",
+      "url": "/wallpapers/cyber.png",
+      "type": "image",
+      "size": "2.1 MB",
+      "created_at": "2026-10-22"
+    }
+  ]
+}

@@ -146,6 +146,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   // Showcase Project Form State
   const [editingProject, setEditingProject] = useState<ShowcaseProject | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
   const [projectForm, setProjectForm] = useState<Partial<ShowcaseProject>>({
     title: '',
     category: 'mc-plugins',
@@ -163,6 +164,128 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     iconSymbol: '⚡',
     links: {},
   });
+
+  const handleSaveProject = async () => {
+    if (!projectForm.title?.trim()) {
+      showToast('Project title is required.');
+      return;
+    }
+    setIsSavingProject(true);
+    try {
+      const isEditing = Boolean(editingProject);
+      const newProj: ShowcaseProject = {
+        id: editingProject ? editingProject.id : `proj-${Date.now()}`,
+        title: projectForm.title.trim(),
+        slug:
+          projectForm.slug ||
+          projectForm.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)+/g, ''),
+        category: projectForm.category || 'web-apps',
+        categoryName: projectForm.categoryName || 'Websites & Web Apps',
+        summary: projectForm.summary || '',
+        description: projectForm.description || '',
+        gradientBg: projectForm.gradientBg || 'from-blue-600 to-indigo-900',
+        iconSymbol: projectForm.iconSymbol || '⚡',
+        screenshots: projectForm.screenshots || [],
+        features: projectForm.features || ['Feature 1'],
+        technologies: projectForm.technologies || ['Java'],
+        status: (projectForm.status as ProjectStatus) || 'Released',
+        featured: Boolean(projectForm.featured),
+        isFree: Boolean(projectForm.isFree),
+        price: projectForm.price || 0,
+        version: projectForm.version || 'v1.0.0',
+        links: projectForm.links || {},
+        createdAt: editingProject?.createdAt || new Date().toISOString().split('T')[0],
+        updatedAt: new Date().toISOString().split('T')[0],
+      };
+
+      const res = await fetch('/api/admin/showcase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newProj,
+          category_id: newProj.category || 'web-apps',
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to save showcase project.');
+        return;
+      }
+
+      if (isEditing) {
+        showcaseStore.updateProject(editingProject!.id, newProj);
+        showToast(`Saved changes to "${newProj.title}"!`);
+      } else {
+        showcaseStore.addProject(newProj);
+        showToast(`Created project "${newProj.title}"!`);
+      }
+      setIsCreatingProject(false);
+      setEditingProject(null);
+    } catch {
+      showToast('Error saving project to server.');
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
+
+  const handleDeleteProject = async (id: string, title: string) => {
+    if (!confirm(`Delete project "${title}"?`)) return;
+    try {
+      const res = await fetch(`/api/admin/showcase?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to delete project.');
+        return;
+      }
+      showcaseStore.deleteProject(id);
+      showToast(`Deleted ${title}`);
+    } catch {
+      showToast('Error deleting project.');
+    }
+  };
+
+  const handleUpdateProjectStatus = async (id: string, status: string) => {
+    try {
+      const res = await fetch('/api/admin/showcase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showcaseStore.updateProject(id, { status: status as any });
+        showToast(`Status updated to ${status}.`);
+      } else {
+        showToast(data.error || 'Failed to update status.');
+      }
+    } catch {
+      showToast('Failed to update status.');
+    }
+  };
+
+  const handleToggleProjectFeatured = async (p: ShowcaseProject) => {
+    try {
+      const nextFeatured = !p.featured;
+      const res = await fetch('/api/admin/showcase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id, featured: nextFeatured }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showcaseStore.toggleFeatured(p.id);
+        showToast(`Project is now ${nextFeatured ? 'Featured' : 'Standard'}.`);
+      } else {
+        showToast(data.error || 'Failed to toggle featured.');
+      }
+    } catch {
+      showToast('Failed to toggle featured.');
+    }
+  };
 
   // Supabase Status State
   const [supabaseStatus, setSupabaseStatus] = useState<{
@@ -221,10 +344,66 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     handleTestSupabase();
   }, []);
 
-  const handleSaveDiscordSettings = (e: React.FormEvent) => {
+  const [isSavingDiscord, setIsSavingDiscord] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/admin/discord')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && d.settings) {
+          setDiscordForm({
+            mainServerUrl: d.settings.main_server_url || discordStore.mainServerUrl,
+            purchaseSupportUrl: d.settings.purchase_support_url || discordStore.purchaseSupportUrl,
+            minecraftProductsUrl: d.settings.minecraft_products_url || discordStore.minecraftProductsUrl,
+            webDevelopmentUrl: d.settings.web_development_url || discordStore.webDevelopmentUrl,
+            discordBotsUrl: d.settings.discord_bots_url || discordStore.discordBotsUrl,
+            serverSetupsUrl: d.settings.server_setups_url || discordStore.serverSetupsUrl,
+            resourcePacksUrl: d.settings.resource_packs_url || discordStore.resourcePacksUrl,
+            fallbackUrl: d.settings.fallback_url || discordStore.fallbackUrl,
+            buttonLabelMinecraft: d.settings.button_label_minecraft || discordStore.buttonLabelMinecraft,
+            buttonLabelStore: d.settings.button_label_store || discordStore.buttonLabelStore,
+            buttonLabelServices: d.settings.button_label_services || discordStore.buttonLabelServices,
+            purchaseInstructions: d.settings.purchase_instructions || discordStore.purchaseInstructions,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveDiscordSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    discordStore.updateSettings(discordForm);
-    showToast('Discord settings updated successfully!');
+    setIsSavingDiscord(true);
+    try {
+      const res = await fetch('/api/admin/discord', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          main_server_url: discordForm.mainServerUrl,
+          purchase_support_url: discordForm.purchaseSupportUrl,
+          minecraft_products_url: discordForm.minecraftProductsUrl,
+          web_development_url: discordForm.webDevelopmentUrl,
+          discord_bots_url: discordForm.discordBotsUrl,
+          server_setups_url: discordForm.serverSetupsUrl,
+          resource_packs_url: discordForm.resourcePacksUrl,
+          fallback_url: discordForm.fallbackUrl,
+          button_label_minecraft: discordForm.buttonLabelMinecraft,
+          button_label_store: discordForm.buttonLabelStore,
+          button_label_services: discordForm.buttonLabelServices,
+          purchase_instructions: discordForm.purchaseInstructions,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to save Discord settings.');
+        return;
+      }
+      discordStore.updateSettings(discordForm);
+      showToast('Discord settings saved and confirmed in persistent storage!');
+    } catch {
+      showToast('Error connecting to server to save Discord settings.');
+    } finally {
+      setIsSavingDiscord(false);
+    }
   };
 
   // Selected file sync
@@ -288,14 +467,14 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         if (d.success && d.settings) {
           setBrandingForm((prev) => ({
             ...prev,
-            brandName: d.settings.brand_name || 'LivingYuji',
-            siteTitle: d.settings.site_title || 'LivingYuji OS — Windows-Inspired Web Operating System & Portfolio',
-            wallpaper: d.settings.wallpaper || 'matrix',
-            accentColor: d.settings.accent_color || '#0078D4',
-            theme: d.settings.theme || 'dark',
+            brandName: d.settings.brand_name || prev.brandName,
+            siteTitle: d.settings.site_title || prev.siteTitle,
+            wallpaper: d.settings.wallpaper || prev.wallpaper,
+            accentColor: d.settings.accent_color || prev.accentColor,
+            theme: d.settings.theme || prev.theme,
             customLogoUrl: d.settings.custom_logo_url || prev.customLogoUrl,
             customFaviconUrl: d.settings.custom_favicon_url || prev.customFaviconUrl,
-            customWallpaperUrl: d.settings.custom_wallpaper_url || prev.customWallpaperUrl,
+            customWallpaperUrl: d.settings.custom_wallpaper_url !== undefined ? d.settings.custom_wallpaper_url : prev.customWallpaperUrl,
           }));
         }
       })
@@ -305,27 +484,6 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleSaveBranding = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsSavingBranding(true);
-
-    // 1. Immediately apply to local store (instant feedback, zero error)
-    updateSettings({
-      brandName: brandingForm.brandName,
-      siteTitle: brandingForm.siteTitle,
-      wallpaper: brandingForm.wallpaper as any,
-      wallpaperType: brandingForm.customVideoWallpaperUrl
-        ? 'video'
-        : brandingForm.customWallpaperUrl
-        ? 'image'
-        : 'preset',
-      accentColor: brandingForm.accentColor,
-      theme: brandingForm.theme as any,
-      customLogoUrl: brandingForm.customLogoUrl || null,
-      customFaviconUrl: brandingForm.customFaviconUrl || null,
-      customWallpaperUrl: brandingForm.customWallpaperUrl || null,
-      customVideoWallpaperUrl: brandingForm.customVideoWallpaperUrl || null,
-      videoWallpaperMuted: brandingForm.videoWallpaperMuted !== false,
-      wallpaperMode: brandingForm.wallpaperMode as any,
-      wallpaperOpacity: brandingForm.wallpaperOpacity,
-    });
 
     try {
       const res = await fetch('/api/admin/branding', {
@@ -340,16 +498,46 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
           custom_logo_url: brandingForm.customLogoUrl || null,
           custom_favicon_url: brandingForm.customFaviconUrl || null,
           custom_wallpaper_url: brandingForm.customWallpaperUrl || null,
+          custom_video_wallpaper_url: brandingForm.customVideoWallpaperUrl || null,
+          video_wallpaper_muted: brandingForm.videoWallpaperMuted !== false,
+          wallpaper_mode: brandingForm.wallpaperMode,
+          wallpaper_opacity: brandingForm.wallpaperOpacity,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        showToast('Settings applied locally (Sign in with passphrase to sync to cloud)');
+        showToast(data.error || 'Failed to save branding settings.');
         return;
       }
-      showToast('Settings saved & published to cloud!');
+
+      // 1. Immediately apply to local store upon confirmed persistence
+      updateSettings({
+        brandName: brandingForm.brandName,
+        siteTitle: brandingForm.siteTitle,
+        wallpaper: brandingForm.wallpaper as any,
+        wallpaperType: brandingForm.customVideoWallpaperUrl
+          ? 'video'
+          : brandingForm.customWallpaperUrl
+          ? 'image'
+          : 'preset',
+        accentColor: brandingForm.accentColor,
+        theme: brandingForm.theme as any,
+        customLogoUrl: brandingForm.customLogoUrl || null,
+        customFaviconUrl: brandingForm.customFaviconUrl || null,
+        customWallpaperUrl: brandingForm.customWallpaperUrl || null,
+        customVideoWallpaperUrl: brandingForm.customVideoWallpaperUrl || null,
+        videoWallpaperMuted: brandingForm.videoWallpaperMuted !== false,
+        wallpaperMode: brandingForm.wallpaperMode as any,
+        wallpaperOpacity: brandingForm.wallpaperOpacity,
+      });
+
+      showToast(
+        data.destination === 'supabase_and_local'
+          ? 'Branding settings saved & synced to Supabase!'
+          : 'Branding settings saved & confirmed in persistent storage!'
+      );
     } catch {
-      showToast('Settings applied locally (offline mode)');
+      showToast('Error connecting to server to save branding.');
     } finally {
       setIsSavingBranding(false);
     }
@@ -436,19 +624,22 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     fetchMcProducts();
   }, []);
 
+  const [isSavingMc, setIsSavingMc] = useState(false);
+
   const handleSaveMcProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mcProductForm.name?.trim()) {
       showToast('Product name is required.');
       return;
     }
+    setIsSavingMc(true);
     try {
       const res = await fetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mcProductForm),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         showToast(data.error || 'Failed to save product.');
         return;
@@ -456,9 +647,11 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       showToast(`Saved product "${mcProductForm.name}"!`);
       setIsCreatingMcProduct(false);
       setEditingMcProduct(null);
-      fetchMcProducts();
+      await fetchMcProducts();
     } catch {
-      showToast('Error saving product.');
+      showToast('Error connecting to server to save product.');
+    } finally {
+      setIsSavingMc(false);
     }
   };
 
@@ -468,13 +661,13 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       const res = await fetch(`/api/admin/products?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         showToast(data.error || 'Failed to delete product.');
         return;
       }
       showToast(`Deleted ${name}`);
-      fetchMcProducts();
+      await fetchMcProducts();
     } catch {
       showToast('Error deleting product.');
     }
@@ -485,6 +678,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   // -------------------------------------------------------------
   const [mediaAssets, setMediaAssets] = useState<any[]>([]);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+  const [isSavingMedia, setIsSavingMedia] = useState(false);
   const [mediaForm, setMediaForm] = useState({ name: '', url: '', type: 'image' });
 
   const fetchMediaAssets = async () => {
@@ -506,21 +700,44 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleAddMedia = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mediaForm.name.trim() || !mediaForm.url.trim()) return;
+    setIsSavingMedia(true);
     try {
       const res = await fetch('/api/admin/media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mediaForm),
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast('Media asset registered successfully!');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showToast('Media asset registered and confirmed!');
         setIsMediaModalOpen(false);
         setMediaForm({ name: '', url: '', type: 'image' });
-        fetchMediaAssets();
+        await fetchMediaAssets();
+      } else {
+        showToast(data.error || 'Failed to register media asset.');
       }
     } catch {
       showToast('Failed to register media asset.');
+    } finally {
+      setIsSavingMedia(false);
+    }
+  };
+
+  const handleDeleteMediaAsset = async (id: string, name: string) => {
+    if (!confirm(`Delete media asset "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/admin/media?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showToast(`Deleted ${name}`);
+        await fetchMediaAssets();
+      } else {
+        showToast(data.error || 'Failed to delete asset.');
+      }
+    } catch {
+      showToast('Error deleting media asset.');
     }
   };
 
@@ -652,6 +869,8 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
   };
 
+  const [isSavingMusic, setIsSavingMusic] = useState(false);
+
   const handleSaveMusicTrack = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!musicForm.title.trim()) {
@@ -662,6 +881,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       showToast('Audio file or valid URL is required.');
       return;
     }
+    setIsSavingMusic(true);
 
     try {
       const isEditing = Boolean(editingTrackId);
@@ -679,19 +899,21 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         showToast(data.error || 'Failed to save track.');
         return;
       }
 
-      showToast(`Track "${payload.title}" saved successfully!`);
+      showToast(`Track "${payload.title}" saved & confirmed!`);
       setIsMusicModalOpen(false);
       setEditingTrackId(null);
       setMusicForm(initialMusicForm);
-      fetchMusicTracks();
+      await fetchMusicTracks();
     } catch {
       showToast('Failed to save music track.');
+    } finally {
+      setIsSavingMusic(false);
     }
   };
 
@@ -704,14 +926,14 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       const res = await fetch(`/api/admin/music?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         showToast(data.error || 'Failed to delete track.');
         return;
       }
       await deleteMusicBlobs(id);
       showToast(`Deleted track "${title}".`);
-      fetchMusicTracks();
+      await fetchMusicTracks();
     } catch {
       showToast('Error deleting track.');
     }
@@ -1315,10 +1537,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         <td className="py-3 px-4">
                           <select
                             value={p.status}
-                            onChange={(e) => {
-                              showcaseStore.updateProject(p.id, { status: e.target.value as any });
-                              showToast(`Status updated to ${e.target.value}`);
-                            }}
+                            onChange={(e) => handleUpdateProjectStatus(p.id, e.target.value)}
                             className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200 focus:outline-none"
                           >
                             <option value="Released">Released</option>
@@ -1331,10 +1550,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         </td>
                         <td className="py-3 px-4">
                           <button
-                            onClick={() => {
-                              showcaseStore.toggleFeatured(p.id);
-                              showToast(`Toggled featured status for ${p.title}`);
-                            }}
+                            onClick={() => handleToggleProjectFeatured(p)}
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                               p.featured
                                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
@@ -1370,15 +1586,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                               <Copy size={14} />
                             </button>
                             <button
-                              onClick={async () => {
-                                if (confirm(`Delete project "${p.title}"?`)) {
-                                  try {
-                                    await fetch(`/api/admin/showcase?id=${encodeURIComponent(p.id)}`, { method: 'DELETE' });
-                                  } catch (err) {}
-                                  showcaseStore.deleteProject(p.id);
-                                  showToast(`Deleted ${p.title}`);
-                                }
-                              }}
+                              onClick={() => handleDeleteProject(p.id, p.title)}
                               className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
                               title="Delete Project"
                             >
@@ -1584,67 +1792,18 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       Cancel
                     </button>
                     <button
-                      onClick={async () => {
-                        if (!projectForm.title?.trim()) {
-                          alert('Project title is required.');
-                          return;
-                        }
-                        if (isCreatingProject) {
-                          const newProj: ShowcaseProject = {
-                            id: `proj-${Date.now()}`,
-                            title: projectForm.title,
-                            slug: projectForm.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                            category: projectForm.category || 'mc-plugins',
-                            categoryName: projectForm.categoryName || 'Minecraft Plugins',
-                            summary: projectForm.summary || '',
-                            description: projectForm.description || '',
-                            gradientBg: projectForm.gradientBg || 'from-blue-600 to-indigo-900',
-                            iconSymbol: projectForm.iconSymbol || '⚡',
-                            screenshots: [],
-                            features: projectForm.features || ['Feature 1'],
-                            technologies: projectForm.technologies || ['Java'],
-                            status: (projectForm.status as ProjectStatus) || 'Released',
-                            featured: Boolean(projectForm.featured),
-                            isFree: Boolean(projectForm.isFree),
-                            price: projectForm.price || 0,
-                            version: projectForm.version || 'v1.0.0',
-                            links: projectForm.links || {},
-                            createdAt: new Date().toISOString().split('T')[0],
-                            updatedAt: new Date().toISOString().split('T')[0],
-                          };
-                          try {
-                            await fetch('/api/admin/showcase', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                ...newProj,
-                                category_id: newProj.category || 'web-apps',
-                              }),
-                            });
-                          } catch (err) {}
-                          showcaseStore.addProject(newProj);
-                          showToast(`Created project "${newProj.title}" and saved to cloud!`);
-                        } else if (editingProject) {
-                          try {
-                            await fetch('/api/admin/showcase', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                ...projectForm,
-                                id: editingProject.id,
-                                category_id: projectForm.category || 'web-apps',
-                              }),
-                            });
-                          } catch (err) {}
-                          showcaseStore.updateProject(editingProject.id, projectForm);
-                          showToast(`Saved changes to "${projectForm.title}" in cloud!`);
-                        }
-                        setIsCreatingProject(false);
-                        setEditingProject(null);
-                      }}
-                      className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold text-xs shadow-lg"
+                      onClick={handleSaveProject}
+                      disabled={isSavingProject}
+                      className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] disabled:opacity-50 text-white font-bold text-xs shadow-lg flex items-center gap-2"
                     >
-                      Save Project to Cloud
+                      {isSavingProject ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <span>Save Project to Cloud</span>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -2910,9 +3069,17 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold text-xs shadow-lg shadow-sky-500/20"
+                        disabled={isSavingMc}
+                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-sky-500/20 flex items-center gap-2"
                       >
-                        Save Product to Cloud
+                        {isSavingMc ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span>Saving Product...</span>
+                          </>
+                        ) : (
+                          <span>{editingMcProduct ? 'Update Product' : 'Save Product to Cloud'}</span>
+                        )}
                       </button>
                     </div>
                   </form>
@@ -3031,10 +3198,20 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
               <div className="flex justify-end gap-3">
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold text-xs shadow-lg shadow-[#5865F2]/20 flex items-center gap-2 transition-all hover:scale-[1.01]"
+                  disabled={isSavingDiscord}
+                  className="px-6 py-2.5 rounded-xl bg-[#5865F2] hover:bg-[#4752C4] disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-[#5865F2]/20 flex items-center gap-2 transition-all hover:scale-[1.01]"
                 >
-                  <Save size={15} />
-                  <span>Save Discord Configuration</span>
+                  {isSavingDiscord ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Saving Configuration...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={15} />
+                      <span>Save Discord Configuration</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -3148,19 +3325,29 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
 
                   <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-400">
                     <span>{asset.size || 'Static'}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (typeof navigator !== 'undefined') {
-                          navigator.clipboard.writeText(asset.url);
-                          showToast(`Copied URL: ${asset.url}`);
-                        }
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-sky-400 flex items-center gap-1 transition-colors"
-                    >
-                      <Copy size={11} />
-                      <span>Copy URL</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof navigator !== 'undefined') {
+                            navigator.clipboard.writeText(asset.url);
+                            showToast(`Copied URL: ${asset.url}`);
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-sky-400 flex items-center gap-1 transition-colors"
+                      >
+                        <Copy size={11} />
+                        <span>Copy URL</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMediaAsset(asset.id, asset.name)}
+                        className="p-1 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+                        title="Delete asset"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -3233,9 +3420,17 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold text-xs shadow-lg shadow-sky-500/20"
+                        disabled={isSavingMedia}
+                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-sky-500/20 flex items-center gap-2"
                       >
-                        Register Asset
+                        {isSavingMedia ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span>Registering...</span>
+                          </>
+                        ) : (
+                          <span>Register Asset</span>
+                        )}
                       </button>
                     </div>
                   </form>
@@ -3706,9 +3901,17 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] text-white font-bold shadow-lg shadow-sky-500/20"
+                        disabled={isSavingMusic}
+                        className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] disabled:opacity-50 text-white font-bold shadow-lg shadow-sky-500/20 flex items-center gap-2"
                       >
-                        {editingTrackId ? 'Save Changes' : 'Publish Track'}
+                        {isSavingMusic ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span>Saving Track...</span>
+                          </>
+                        ) : (
+                          <span>{editingTrackId ? 'Save Changes' : 'Publish Track'}</span>
+                        )}
                       </button>
                     </div>
                   </form>

@@ -536,7 +536,7 @@ export function MinecraftStoreApp() {
   };
 
   // Admin: Create product
-  const handleAdminCreateProduct = (e: React.FormEvent) => {
+  const handleAdminCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminProductForm.name.trim()) return;
 
@@ -572,15 +572,53 @@ export function MinecraftStoreApp() {
       updatedAt: new Date().toISOString().split('T')[0],
     };
 
-    setProducts((prev) => [newProduct, ...prev]);
-    alert(`Product "${newProduct.name}" created successfully!`);
-    setActiveTab('store');
+    try {
+      const res = await fetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newProduct,
+          category_name: newProduct.categoryName,
+          short_desc: newProduct.shortDesc,
+          full_desc: newProduct.fullDesc,
+          is_free: newProduct.isFree,
+          mc_versions: newProduct.mcVersions,
+          server_software: newProduct.serverSoftware,
+          installation_steps: newProduct.installationSteps,
+          file_format: newProduct.fileFormat,
+          file_size: newProduct.fileSize,
+          downloads_count: newProduct.downloadsCount,
+          icon_bg: newProduct.iconBg,
+          icon_symbol: newProduct.iconSymbol,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setProducts((prev) => [newProduct, ...prev]);
+        alert(`Product "${newProduct.name}" created and saved to persistent catalog!`);
+        setActiveTab('store');
+      } else {
+        alert(data.error || 'Failed to save product to server.');
+      }
+    } catch {
+      alert('Error connecting to server to save product.');
+    }
   };
 
-  const deleteProduct = (id: string) => {
+  const deleteProduct = async (id: string) => {
     if (confirm('Are you sure you want to delete this product?')) {
-      setProducts((prev) => prev.filter((p) => p.id !== id));
-      if (selectedProduct?.id === id) setSelectedProduct(null);
+      try {
+        const res = await fetch(`/api/admin/products?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+          setProducts((prev) => prev.filter((p) => p.id !== id));
+          if (selectedProduct?.id === id) setSelectedProduct(null);
+        } else {
+          alert(data.error || 'Failed to delete product from server.');
+        }
+      } catch {
+        alert('Error connecting to server to delete product.');
+      }
     }
   };
 

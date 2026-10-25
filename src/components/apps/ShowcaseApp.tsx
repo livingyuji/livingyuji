@@ -70,9 +70,13 @@ export function ShowcaseApp() {
             categoryName: p.category_name || (p.category_id === 'mc-plugins' ? 'Minecraft Plugins' : 'Websites & Web Apps'),
             gradientBg: p.gradient_bg || p.gradientBg || 'from-blue-600 to-indigo-900',
             iconSymbol: p.icon_symbol || p.iconSymbol || '⚡',
+            featured: Boolean(p.featured),
             isFree: p.is_free !== undefined ? p.is_free : true,
             price: Number(p.price) || 0,
+            version: p.version || 'v1.0.0',
+            features: Array.isArray(p.features) ? p.features : ['Core Feature'],
             technologies: Array.isArray(p.technologies) ? p.technologies : [],
+            screenshots: Array.isArray(p.screenshots) ? p.screenshots : [],
             links: p.links || {
               github: p.github_url || '',
               liveUrl: p.live_url || '',
