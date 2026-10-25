@@ -174,7 +174,7 @@ const DEFAULT_SETTINGS: OSSettings = {
   siteTitle: 'LivingYuji OS — Windows-Inspired Web Operating System & Portfolio',
   customLogoUrl: '/avatar.png',
   customFaviconUrl: '/favicon.png',
-  customWallpaperUrl: null,
+  customWallpaperUrl: 'https://in.pinterest.com/pin/759208449671054524/',
   customVideoWallpaperUrl: null,
   videoWallpaperMuted: true,
   wallpaperMode: 'cover',

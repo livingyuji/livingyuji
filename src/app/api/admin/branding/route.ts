@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS = {
   theme: 'dark',
   custom_logo_url: '/avatar.png',
   custom_favicon_url: '/favicon.png',
-  custom_wallpaper_url: null,
+  custom_wallpaper_url: 'https://in.pinterest.com/pin/759208449671054524/',
 };
 
 export async function GET() {
