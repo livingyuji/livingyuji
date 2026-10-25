@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       const token = signSessionToken();
 
       if (isJson) {
-        const res = NextResponse.json({ success: true, message: 'Authentication successful', returnTo }, { status: 200 });
+        const res = NextResponse.json({ success: true, message: 'Authentication successful', returnTo, token }, { status: 200 });
         res.cookies.set(ADMIN_COOKIE_NAME, token, ADMIN_COOKIE_OPTIONS);
         return res;
       }

@@ -8,8 +8,11 @@ import { ArrowLeft, Monitor, LogOut } from 'lucide-react';
 export function AdminDashboardClient() {
   const handleSignOut = async () => {
     try {
-      await fetch('/api/admin/logout', { method: 'POST' });
+      await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
     } finally {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('lyos_admin_token');
+      }
       window.location.href = '/admin?message=logged_out';
     }
   };

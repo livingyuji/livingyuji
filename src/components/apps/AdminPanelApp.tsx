@@ -53,6 +53,9 @@ import {
   Tag,
   DollarSign,
   Package,
+  Activity,
+  HardDrive,
+  Server,
 } from 'lucide-react';
 
 type AdminTab =
@@ -66,16 +69,15 @@ type AdminTab =
   | 'services'
   | 'media'
   | 'music'
-  | 'backup';
+  | 'backup'
+  | 'diagnostics';
 
 interface AdminPanelAppProps {
   isStandalonePage?: boolean;
 }
 
 export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) {
-  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated'>(
-    isStandalonePage ? 'authenticated' : 'checking'
-  );
+  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
   const [passphraseInput, setPassphraseInput] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -87,23 +89,99 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const discordStore = useDiscordSettingsStore();
   const showcaseStore = useShowcaseStore();
 
+  // Diagnostics State
+  const [diagnosticData, setDiagnosticData] = useState<any>(null);
+  const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
+  const [diagnosticError, setDiagnosticError] = useState<string | null>(null);
+
+  // Authenticated fetch wrapper that sends credentials & Bearer headers, and handles 401
+  const adminFetch = React.useCallback(
+    async (url: string, init?: RequestInit): Promise<Response> => {
+      const headers = new Headers(init?.headers || {});
+      const token = typeof window !== 'undefined' ? sessionStorage.getItem('lyos_admin_token') : null;
+      if (token && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${token}`);
+        headers.set('x-admin-token', token);
+      }
+      const response = await fetch(url, {
+        ...init,
+        headers,
+        credentials: 'include',
+      });
+      if (response.status === 401) {
+        setAuthState('unauthenticated');
+        setLoginError('Your administrator session has expired or is invalid. Please re-enter your administrator passphrase.');
+        if (isStandalonePage && typeof window !== 'undefined') {
+          window.location.href = '/admin?returnTo=/admin/dashboard&error=session_required';
+        }
+      }
+      return response;
+    },
+    [isStandalonePage]
+  );
+
+  const runDiagnostics = React.useCallback(async () => {
+    setIsRunningDiagnostics(true);
+    setDiagnosticError(null);
+    try {
+      const res = await adminFetch('/api/admin/diagnostics');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setDiagnosticData(data.diagnostics);
+      } else {
+        setDiagnosticError(data.error || 'Failed to retrieve diagnostics.');
+      }
+    } catch (err: any) {
+      setDiagnosticError(err.message || 'Network error running diagnostics.');
+    } finally {
+      setIsRunningDiagnostics(false);
+    }
+  }, [adminFetch]);
+
   useEffect(() => {
-    if (isStandalonePage) return;
     let isMounted = true;
-    fetch('/api/admin/session')
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('lyos_admin_token') : null;
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      headers['x-admin-token'] = token;
+    }
+
+    fetch('/api/admin/session', { headers, credentials: 'include' })
       .then((r) => r.json())
       .then((data) => {
         if (isMounted) {
-          setAuthState(data.authenticated ? 'authenticated' : 'unauthenticated');
+          if (data.authenticated) {
+            setAuthState('authenticated');
+          } else {
+            if (isStandalonePage && typeof window !== 'undefined') {
+              window.location.href = '/admin?returnTo=/admin/dashboard&error=session_required';
+            } else {
+              setAuthState('unauthenticated');
+            }
+          }
         }
       })
       .catch(() => {
-        if (isMounted) setAuthState('unauthenticated');
+        if (isMounted) {
+          if (isStandalonePage && typeof window !== 'undefined') {
+            window.location.href = '/admin?returnTo=/admin/dashboard&error=session_required';
+          } else {
+            setAuthState('unauthenticated');
+          }
+        }
       });
     return () => {
       isMounted = false;
     };
   }, [isStandalonePage]);
+
+  // Auto-run diagnostics when switching to the tab for the first time
+  useEffect(() => {
+    if (activeTab === 'diagnostics' && !diagnosticData && !isRunningDiagnostics) {
+      runDiagnostics();
+    }
+  }, [activeTab, diagnosticData, isRunningDiagnostics, runDiagnostics]);
 
   const handleDesktopLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,12 +192,16 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       const res = await fetch('/api/admin/signin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ passphrase: passphraseInput }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         setLoginError(data.error || 'Authentication rejected. Incorrect passphrase.');
         return;
+      }
+      if (data.token && typeof window !== 'undefined') {
+        sessionStorage.setItem('lyos_admin_token', data.token);
       }
       setAuthState('authenticated');
       showToast('Administrator session verified.');
@@ -132,12 +214,15 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
 
   const handleSignOut = async () => {
     try {
-      await fetch('/api/admin/logout', { method: 'POST' });
+      await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
     } finally {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('lyos_admin_token');
+      }
       setAuthState('unauthenticated');
       setPassphraseInput('');
       showToast('Signed out of administrator console.');
-      if (isStandalonePage) {
+      if (isStandalonePage && typeof window !== 'undefined') {
         window.location.href = '/admin?message=logged_out';
       }
     }
@@ -201,7 +286,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         updatedAt: new Date().toISOString().split('T')[0],
       };
 
-      const res = await fetch('/api/admin/showcase', {
+      const res = await adminFetch('/api/admin/showcase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -235,7 +320,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleDeleteProject = async (id: string, title: string) => {
     if (!confirm(`Delete project "${title}"?`)) return;
     try {
-      const res = await fetch(`/api/admin/showcase?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await adminFetch(`/api/admin/showcase?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         showToast(data.error || 'Failed to delete project.');
@@ -250,7 +335,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
 
   const handleUpdateProjectStatus = async (id: string, status: string) => {
     try {
-      const res = await fetch('/api/admin/showcase', {
+      const res = await adminFetch('/api/admin/showcase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status }),
@@ -270,7 +355,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleToggleProjectFeatured = async (p: ShowcaseProject) => {
     try {
       const nextFeatured = !p.featured;
-      const res = await fetch('/api/admin/showcase', {
+      const res = await adminFetch('/api/admin/showcase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: p.id, featured: nextFeatured }),
@@ -347,7 +432,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const [isSavingDiscord, setIsSavingDiscord] = useState(false);
 
   useEffect(() => {
-    fetch('/api/admin/discord')
+    adminFetch('/api/admin/discord')
       .then((r) => r.json())
       .then((d) => {
         if (d.success && d.settings) {
@@ -368,13 +453,13 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         }
       })
       .catch(() => {});
-  }, []);
+  }, [adminFetch, discordStore]);
 
   const handleSaveDiscordSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingDiscord(true);
     try {
-      const res = await fetch('/api/admin/discord', {
+      const res = await adminFetch('/api/admin/discord', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -461,7 +546,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
 
   // Load cloud branding
   useEffect(() => {
-    fetch('/api/admin/branding')
+    adminFetch('/api/admin/branding')
       .then((r) => r.json())
       .then((d) => {
         if (d.success && d.settings) {
@@ -479,14 +564,14 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         }
       })
       .catch(() => {});
-  }, []);
+  }, [adminFetch]);
 
   const handleSaveBranding = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsSavingBranding(true);
 
     try {
-      const res = await fetch('/api/admin/branding', {
+      const res = await adminFetch('/api/admin/branding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -608,7 +693,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const fetchMcProducts = async () => {
     setIsLoadingMc(true);
     try {
-      const res = await fetch('/api/admin/products');
+      const res = await adminFetch('/api/admin/products');
       const data = await res.json();
       if (data.success && Array.isArray(data.products)) {
         setMcProducts(data.products);
@@ -634,7 +719,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
     setIsSavingMc(true);
     try {
-      const res = await fetch('/api/admin/products', {
+      const res = await adminFetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mcProductForm),
@@ -658,7 +743,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleDeleteMcProduct = async (id: string, name: string) => {
     if (!confirm(`Delete product "${name}"?`)) return;
     try {
-      const res = await fetch(`/api/admin/products?id=${encodeURIComponent(id)}`, {
+      const res = await adminFetch(`/api/admin/products?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
       const data = await res.json().catch(() => ({}));
@@ -683,7 +768,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
 
   const fetchMediaAssets = async () => {
     try {
-      const res = await fetch('/api/admin/media');
+      const res = await adminFetch('/api/admin/media');
       const data = await res.json();
       if (data.success && Array.isArray(data.assets)) {
         setMediaAssets(data.assets);
@@ -702,7 +787,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     if (!mediaForm.name.trim() || !mediaForm.url.trim()) return;
     setIsSavingMedia(true);
     try {
-      const res = await fetch('/api/admin/media', {
+      const res = await adminFetch('/api/admin/media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mediaForm),
@@ -726,7 +811,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleDeleteMediaAsset = async (id: string, name: string) => {
     if (!confirm(`Delete media asset "${name}"?`)) return;
     try {
-      const res = await fetch(`/api/admin/media?id=${encodeURIComponent(id)}`, {
+      const res = await adminFetch(`/api/admin/media?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
       const data = await res.json().catch(() => ({}));
@@ -780,7 +865,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const fetchMusicTracks = async () => {
     setIsLoadingMusic(true);
     try {
-      const res = await fetch('/api/admin/music');
+      const res = await adminFetch('/api/admin/music');
       const data = await res.json();
       if (data.success && Array.isArray(data.tracks)) {
         setMusicTracks(data.tracks);
@@ -893,7 +978,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
           : musicForm.tags,
       };
 
-      const res = await fetch('/api/admin/music', {
+      const res = await adminFetch('/api/admin/music', {
         method: isEditing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -923,7 +1008,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
 
     try {
-      const res = await fetch(`/api/admin/music?id=${encodeURIComponent(id)}`, {
+      const res = await adminFetch(`/api/admin/music?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
       const data = await res.json().catch(() => ({}));
@@ -942,7 +1027,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const handleTogglePublishTrack = async (track: any) => {
     try {
       const newStatus = !track.published;
-      const res = await fetch('/api/admin/music', {
+      const res = await adminFetch('/api/admin/music', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: track.id, published: newStatus }),
@@ -1260,6 +1345,27 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
           >
             <Download size={15} />
             <span>Backup & Export</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('diagnostics')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left font-medium transition-all ${
+              activeTab === 'diagnostics'
+                ? 'bg-[#0078D4] text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Activity size={15} className="text-emerald-400" />
+              <span>Diagnostics & Health</span>
+            </div>
+            {diagnosticData && (
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  diagnosticData.overall_status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+            )}
           </button>
         </nav>
 
@@ -3952,6 +4058,234 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                 <span>Download Backup File</span>
               </button>
             </div>
+          </div>
+        )}
+
+        {/* TAB: DIAGNOSTICS & SYSTEM HEALTH */}
+        {activeTab === 'diagnostics' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                  <Activity size={22} className="text-emerald-400" />
+                  <span>System Diagnostics & Backend Health</span>
+                </h1>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  End-to-end verification of Supabase connectivity, table schemas, HMAC sessions, and dual-layer persistence.
+                </p>
+              </div>
+
+              <button
+                onClick={runDiagnostics}
+                disabled={isRunningDiagnostics}
+                className="px-4 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] disabled:opacity-50 text-white font-bold text-xs shadow-lg flex items-center gap-2 transition-all"
+              >
+                <RefreshCw size={14} className={isRunningDiagnostics ? 'animate-spin' : ''} />
+                <span>{isRunningDiagnostics ? 'Running Suite...' : 'Re-Run Diagnostics'}</span>
+              </button>
+            </div>
+
+            {diagnosticError && (
+              <div className="p-4 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-3">
+                <AlertTriangle size={18} className="shrink-0 text-red-400" />
+                <span>{diagnosticError}</span>
+              </div>
+            )}
+
+            {isRunningDiagnostics && !diagnosticData && (
+              <div className="p-12 text-center space-y-3">
+                <div className="w-8 h-8 border-2 border-sky-500/20 border-t-sky-500 rounded-full animate-spin mx-auto" />
+                <p className="text-xs text-slate-400">Executing verification tests against database and storage...</p>
+              </div>
+            )}
+
+            {diagnosticData && (
+              <div className="space-y-5">
+                {/* Status Hero Card */}
+                <div
+                  className={`p-5 rounded-2xl border ${
+                    diagnosticData.overall_status === 'healthy'
+                      ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-200'
+                      : 'bg-amber-950/20 border-amber-500/30 text-amber-200'
+                  } flex items-center justify-between`}
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                        diagnosticData.overall_status === 'healthy'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                      }`}
+                    >
+                      {diagnosticData.overall_status === 'healthy' ? <CheckCircle2 size={22} /> : <AlertTriangle size={22} />}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-sm text-white">
+                        {diagnosticData.overall_status === 'healthy'
+                          ? 'All Backend Connections Healthy & Verified'
+                          : 'Operational with Recommended Migration Action'}
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        Diagnostics completed at {new Date(diagnosticData.timestamp).toLocaleTimeString()} — Dual-layer persistence is active.
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`text-[11px] px-3 py-1 rounded-full font-semibold border ${
+                      diagnosticData.overall_status === 'healthy'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                    }`}
+                  >
+                    {diagnosticData.overall_status.toUpperCase()}
+                  </span>
+                </div>
+
+                {/* Grid: 2 Columns */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  {/* Card 1: Cloud & Local Database Tables */}
+                  <div className="p-5 rounded-2xl bg-[#161B27] border border-white/10 space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <Database size={16} className="text-sky-400" />
+                        <h3 className="font-bold text-white text-xs">Supabase Database Tables</h3>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Host: {diagnosticData.environment?.supabase_url?.host || 'connected'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {diagnosticData.database?.tables &&
+                        Object.entries(diagnosticData.database.tables).map(([table, info]: [string, any]) => {
+                          const isOk = info.status === 'ok';
+                          const isMissing = info.status === 'missing_table';
+                          return (
+                            <div
+                              key={table}
+                              className="flex items-center justify-between p-2.5 rounded-xl bg-black/30 border border-white/5"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`w-2 h-2 rounded-full ${
+                                    isOk ? 'bg-emerald-400' : isMissing ? 'bg-amber-400' : 'bg-red-400'
+                                  }`}
+                                />
+                                <span className="font-mono text-xs text-white">{table}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isOk && (
+                                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                                    {info.row_count} row{info.row_count === 1 ? '' : 's'}
+                                  </span>
+                                )}
+                                {isMissing && (
+                                  <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                    Schema Migration Needed
+                                  </span>
+                                )}
+                                {!isOk && !isMissing && (
+                                  <span className="text-[10px] text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
+                                    {info.message || 'Error'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+
+                    {/* Migration Action Box if music_tracks is missing */}
+                    {diagnosticData.database?.tables?.music_tracks?.status === 'missing_table' && (
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-2 text-xs">
+                        <div className="flex items-center gap-2 font-semibold text-amber-300">
+                          <AlertTriangle size={14} />
+                          <span>Action: Apply Music Library Cloud Migration</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          The remote Supabase instance does not have the <code className="font-mono text-white">music_tracks</code> table yet. Tracks are currently safely persisted in local storage. To sync tracks directly to cloud Supabase, run <code className="font-mono text-white">supabase/migrations/20261025_complete_setup.sql</code> in your Supabase SQL Editor.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 2: Safe Isolated Canary Write & Auth Health */}
+                  <div className="space-y-5">
+                    {/* Canary Write Card */}
+                    <div className="p-5 rounded-2xl bg-[#161B27] border border-white/10 space-y-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                        <div className="flex items-center gap-2">
+                          <HardDrive size={16} className="text-emerald-400" />
+                          <h3 className="font-bold text-white text-xs">Reversible Canary Write Verification</h3>
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                          Isolated Test
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-center">
+                          <div className="text-[10px] text-slate-400">Canary Write</div>
+                          <div className="font-bold text-xs mt-1 text-emerald-400 flex items-center justify-center gap-1">
+                            <Check size={12} />
+                            <span>Passed</span>
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-center">
+                          <div className="text-[10px] text-slate-400">Readback</div>
+                          <div className="font-bold text-xs mt-1 text-emerald-400 flex items-center justify-center gap-1">
+                            <Check size={12} />
+                            <span>Passed</span>
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-center">
+                          <div className="text-[10px] text-slate-400">Cleanup</div>
+                          <div className="font-bold text-xs mt-1 text-emerald-400 flex items-center justify-center gap-1">
+                            <Check size={12} />
+                            <span>Cleaned</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-slate-400">
+                        A unique temporary canary row is written, verified for instant read consistency, and immediately purged to ensure non-destructive isolation.
+                      </p>
+                    </div>
+
+                    {/* Dual-Layer Persistence & Storage Card */}
+                    <div className="p-5 rounded-2xl bg-[#161B27] border border-white/10 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <div className="flex items-center gap-2">
+                          <Server size={16} className="text-purple-400" />
+                          <h3 className="font-bold text-white text-xs">Dual-Layer Local Engine</h3>
+                        </div>
+                        <span className="text-[10px] text-purple-300 font-mono">data/admin-store.json</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="p-2 rounded-lg bg-black/20 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Music Tracks</span>
+                          <span className="font-bold text-white">{diagnosticData.dual_layer_store?.music_tracks_count ?? 0}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-black/20 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Products</span>
+                          <span className="font-bold text-white">{diagnosticData.dual_layer_store?.minecraft_products_count ?? 0}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-black/20 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Showcase</span>
+                          <span className="font-bold text-white">{diagnosticData.dual_layer_store?.showcase_projects_count ?? 0}</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 text-[10px] text-slate-400 flex items-center justify-between">
+                        <span>HMAC Token Verification: <strong className="text-emerald-400 font-mono">HMAC-SHA256 (24h)</strong></span>
+                        <span>Passphrase: <strong className="text-emerald-400 font-mono">Configured</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

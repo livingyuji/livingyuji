@@ -13,7 +13,7 @@
     "video_wallpaper_muted": true,
     "wallpaper_mode": "cover",
     "wallpaper_opacity": 85,
-    "updated_at": "2026-10-25T17:17:31.943Z"
+    "updated_at": "2026-10-25T18:23:30.836Z"
   },
   "discord_settings": {
     "id": "default",
@@ -29,7 +29,7 @@
     "button_label_minecraft": "Get on Discord Now",
     "button_label_services": "Inquire on Discord",
     "purchase_instructions": "1. Join the LivingYuji Discord server.\n2. Navigate to the #orders or #tickets channel.\n3. Mention the product code or name to open an order ticket.\n4. LivingYuji or our automated assistant will verify payment & deliver your asset instantly.",
-    "updated_at": "2026-10-25T17:17:32.005Z"
+    "updated_at": "2026-10-25T18:23:30.880Z"
   },
   "showcase_projects": [
     {

@@ -129,18 +129,39 @@ export function getClientIp(req: NextRequest | Request): string {
 
 /**
  * Server-side check for admin authentication in Route Handlers or Server Actions
+ * Supports:
+ * 1. HTTP-only signed session cookie ('lyos-admin-session')
+ * 2. Authorization header ('Bearer <token>')
+ * 3. Custom admin header ('x-admin-token')
+ * 4. Supabase auth cookie ('sb-access-token')
  */
 export async function isAuthenticatedAdmin(req: NextRequest | Request): Promise<boolean> {
-  const cookieHeader = req.headers.get('cookie') || '';
-  const cookies = parseCookies(cookieHeader);
+  const headers = req.headers;
 
-  // 1. Check custom signed HMAC session
+  // 1. Check Authorization Bearer header
+  const authHeader = headers.get('authorization') || '';
+  if (authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader.substring(7).trim();
+    if (verifySessionToken(bearerToken)) {
+      return true;
+    }
+  }
+
+  // 2. Check custom x-admin-token header
+  const xAdminToken = headers.get('x-admin-token')?.trim();
+  if (xAdminToken && verifySessionToken(xAdminToken)) {
+    return true;
+  }
+
+  // 3. Check custom signed HMAC session cookie
+  const cookieHeader = headers.get('cookie') || '';
+  const cookies = parseCookies(cookieHeader);
   const sessionToken = cookies[ADMIN_COOKIE_NAME];
   if (sessionToken && verifySessionToken(sessionToken)) {
     return true;
   }
 
-  // 2. Check Supabase token if configured
+  // 4. Check Supabase token if configured
   const supabaseToken = cookies[SUPABASE_COOKIE_NAME];
   if (supabaseToken) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
