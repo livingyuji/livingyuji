@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useWindowStore, STREAMABLE_FALLBACK_VIDEO_URL } from '@/store/windowStore';
+import { useWindowStore, STREAMABLE_DEFAULT_VIDEO_URL } from '@/store/windowStore';
 import { detectIframeVideoSource } from '@/lib/validation/urls';
 
 export function SiteBrandingSync() {
@@ -51,10 +51,11 @@ export function SiteBrandingSync() {
                 : '';
             const preset = typeof s.wallpaper === 'string' ? s.wallpaper.trim() : '';
 
-            // Priority: an explicit visitor choice (handled above) wins, then
-            // a server-configured image or preset, and only then the optional
-            // Streamable video fallback. The video URL is retained alongside
-            // an image/preset so it stays available as a fallback.
+            // Priority:
+            // 1. Visitor explicit personal wallpaper (handled by hasLocalPersonalWallpaper).
+            // 2. Server admin custom image override (s.custom_wallpaper_url).
+            // 3. Server admin custom preset override (if explicitly configured and not default seed).
+            // 4. Shared public default: Streamable coding video (or admin custom video if provided).
             if (imageUrl) {
               updates.customWallpaperUrl = imageUrl;
               updates.wallpaperType = 'image';
@@ -62,7 +63,7 @@ export function SiteBrandingSync() {
                 updates.customVideoWallpaperUrl = videoUrl;
                 updates.videoWallpaperSource = detectIframeVideoSource(videoUrl);
               }
-            } else if (preset) {
+            } else if (preset && preset !== 'matrix' && preset !== 'cyber') {
               updates.wallpaper = preset;
               updates.wallpaperType = 'preset';
               if (videoUrl) {
@@ -70,13 +71,12 @@ export function SiteBrandingSync() {
                 updates.videoWallpaperSource = detectIframeVideoSource(videoUrl);
               }
             } else {
-              // No server-configured image or preset: use the configured
-              // video, or the built-in Streamable coding video, as fallback.
-              const fallbackVideoUrl =
-                videoUrl || current.customVideoWallpaperUrl || STREAMABLE_FALLBACK_VIDEO_URL;
-              updates.customVideoWallpaperUrl = fallbackVideoUrl;
+              // No custom admin image or custom preset: shared public default Streamable coding video
+              const defaultVideoUrl =
+                videoUrl || current.customVideoWallpaperUrl || STREAMABLE_DEFAULT_VIDEO_URL;
+              updates.customVideoWallpaperUrl = defaultVideoUrl;
               updates.wallpaperType = 'video';
-              updates.videoWallpaperSource = detectIframeVideoSource(fallbackVideoUrl);
+              updates.videoWallpaperSource = detectIframeVideoSource(defaultVideoUrl);
             }
 
             if (typeof s.video_wallpaper_muted === 'boolean') {

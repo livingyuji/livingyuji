@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, waitFor } from '@testing-library/react';
-import { migrateWindowStoreState, useWindowStore } from '@/store/windowStore';
+import { migrateWindowStoreState, useWindowStore, STREAMABLE_DEFAULT_VIDEO_URL } from '@/store/windowStore';
 import { SiteBrandingSync } from '@/components/common/SiteBrandingSync';
 
 function jsonResponse(body: unknown, ok = true): Response {
@@ -23,15 +23,15 @@ describe('Visitor wallpaper preference hydration', () => {
     global.fetch = originalFetch;
   });
 
-  test('new stores default to the preset wallpaper with Streamable as fallback', () => {
+  test('new stores default to the Streamable coding video as the shared public animated background', () => {
     const settings = useWindowStore.getState().settings;
-    expect(settings.wallpaperType).toBe('preset');
-    expect(settings.wallpaper).toBe('matrix');
-    expect(settings.customVideoWallpaperUrl).toContain('streamable.com');
+    expect(settings.wallpaperType).toBe('video');
+    expect(settings.videoWallpaperSource).toBe('iframe');
+    expect(settings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
     expect(settings.wallpaperUserOverride).toBe(false);
   });
 
-  test('v0 migration preserves an untouched legacy preset instead of forcing video', () => {
+  test('v0 migration upgrades an untouched legacy store to default Streamable coding video', () => {
     const migrated = migrateWindowStoreState(
       {
         settings: {
@@ -44,10 +44,9 @@ describe('Visitor wallpaper preference hydration', () => {
       0
     );
 
-    expect(migrated.settings?.wallpaperType).toBe('preset');
-    expect(migrated.settings?.wallpaper).toBe('matrix');
-    expect(migrated.settings?.videoWallpaperSource).toBe(undefined);
-    expect(migrated.settings?.customVideoWallpaperUrl).toBeNull();
+    expect(migrated.settings?.wallpaperType).toBe('video');
+    expect(migrated.settings?.videoWallpaperSource).toBe('iframe');
+    expect(migrated.settings?.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
     expect(migrated.settings?.wallpaperUserOverride).toBe(false);
   });
 
@@ -346,5 +345,76 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(after.wallpaperType).toBe(before.wallpaperType);
     expect(after.customVideoWallpaperUrl).toBe(before.customVideoWallpaperUrl);
     expect(after.customWallpaperUrl).toBe(before.customWallpaperUrl);
+  });
+
+  test('regression: unauthenticated visitor with no saved wallpaper gets default Streamable coding video while explicit visitor choice wins', async () => {
+    // 1. Unauthenticated visitor with fresh browser session (no local saved state)
+    localStorage.clear();
+    useWindowStore.getState().resetSettings();
+
+    const freshSettings = useWindowStore.getState().settings;
+    expect(freshSettings.wallpaperType).toBe('video');
+    expect(freshSettings.videoWallpaperSource).toBe('iframe');
+    expect(freshSettings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    expect(freshSettings.wallpaperUserOverride).toBe(false);
+
+    // When public branding hydrates from server with default base DB row (no custom video/image)
+    (global.fetch as jest.Mock).mockResolvedValue(
+      jsonResponse({
+        success: true,
+        settings: {
+          brand_name: 'LivingYuji',
+          site_title: 'LivingYuji OS',
+          wallpaper: 'matrix',
+          custom_wallpaper_url: null,
+          custom_video_wallpaper_url: null,
+          video_wallpaper_muted: true,
+        },
+      })
+    );
+
+    const { unmount } = render(React.createElement(SiteBrandingSync));
+    await waitFor(() => {
+      expect(useWindowStore.getState().settings.brandName).toBe('LivingYuji');
+    });
+
+    const visitorSettings = useWindowStore.getState().settings;
+    expect(visitorSettings.wallpaperType).toBe('video');
+    expect(visitorSettings.videoWallpaperSource).toBe('iframe');
+    expect(visitorSettings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    expect(visitorSettings.wallpaperUserOverride).toBe(false);
+    unmount();
+
+    // 2. Now simulate visitor selecting their own explicit wallpaper preference
+    useWindowStore.getState().updateSettings({
+      wallpaper: 'forest',
+      wallpaperType: 'preset',
+      wallpaperUserOverride: true,
+    });
+
+    // Cloud branding updates again (e.g. background poll or page re-navigation)
+    (global.fetch as jest.Mock).mockResolvedValue(
+      jsonResponse({
+        success: true,
+        settings: {
+          brand_name: 'LivingYuji Updated',
+          site_title: 'LivingYuji OS Updated',
+          wallpaper: 'cyber',
+          custom_wallpaper_url: null,
+          custom_video_wallpaper_url: 'https://streamable.com/e/server-video',
+        },
+      })
+    );
+
+    render(React.createElement(SiteBrandingSync));
+    await waitFor(() => {
+      expect(useWindowStore.getState().settings.brandName).toBe('LivingYuji Updated');
+    });
+
+    // Visitor's explicit wallpaper MUST still win
+    const overrideSettings = useWindowStore.getState().settings;
+    expect(overrideSettings.wallpaper).toBe('forest');
+    expect(overrideSettings.wallpaperType).toBe('preset');
+    expect(overrideSettings.wallpaperUserOverride).toBe(true);
   });
 });

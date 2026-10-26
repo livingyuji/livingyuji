@@ -170,16 +170,18 @@ export const APP_CONFIGS: Record<AppId, { title: string; defaultWidth: number; d
 };
 
 /**
- * Optional Streamable coding-video wallpaper. It is retained in state as a
- * fallback, but only renders when no image or preset wallpaper is available.
+ * Default Streamable coding-video wallpaper embed URL with verified parameters
+ * for muted autoplay, looping, and hidden controls per official documentation.
  */
-export const STREAMABLE_FALLBACK_VIDEO_URL =
-  'https://streamable.com/e/c51sit?autoplay=1&loop=1&muted=1&controls=0';
+export const STREAMABLE_DEFAULT_VIDEO_URL =
+  'https://streamable.com/e/c51sit?autoplay=1&muted=1&loop=1&nocontrols=1';
+
+export const STREAMABLE_FALLBACK_VIDEO_URL = STREAMABLE_DEFAULT_VIDEO_URL;
 
 const DEFAULT_SETTINGS: OSSettings = {
   wallpaper: 'matrix',
-  wallpaperType: 'preset',
-  videoWallpaperSource: null,
+  wallpaperType: 'video',
+  videoWallpaperSource: 'iframe',
   theme: 'dark',
   accentColor: '#1686DC',
   reducedMotion: false,
@@ -194,7 +196,7 @@ const DEFAULT_SETTINGS: OSSettings = {
   customLogoUrl: '/avatar.png',
   customFaviconUrl: '/favicon.png',
   customWallpaperUrl: null,
-  customVideoWallpaperUrl: STREAMABLE_FALLBACK_VIDEO_URL,
+  customVideoWallpaperUrl: STREAMABLE_DEFAULT_VIDEO_URL,
   videoWallpaperMuted: true,
   wallpaperMode: 'cover',
   wallpaperOpacity: 85,
@@ -237,6 +239,11 @@ export function migrateWindowStoreState(
       );
 
     settings.wallpaperUserOverride = explicitlyPersonal;
+    if (!explicitlyPersonal) {
+      settings.wallpaperType = 'video';
+      settings.videoWallpaperSource = 'iframe';
+      settings.customVideoWallpaperUrl = DEFAULT_SETTINGS.customVideoWallpaperUrl;
+    }
   }
 
   return state;

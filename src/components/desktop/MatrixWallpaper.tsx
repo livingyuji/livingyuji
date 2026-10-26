@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { STREAMABLE_FALLBACK_VIDEO_URL, useWindowStore } from '@/store/windowStore';
+import { STREAMABLE_DEFAULT_VIDEO_URL, STREAMABLE_FALLBACK_VIDEO_URL, useWindowStore } from '@/store/windowStore';
 import {
   loadVideoWallpaperBlob,
   getActiveVideoBlobUrl,
@@ -15,8 +15,8 @@ const FALLBACK_BG_STYLE: React.CSSProperties = {
   background: 'linear-gradient(135deg, #0E121A 0%, #182335 40%, #0C0F16 100%)',
 };
 
-export function MatrixWallpaper() {
-  const { settings } = useWindowStore();
+export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
+  const settings = useWindowStore((state) => state.settings);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -324,8 +324,8 @@ export function MatrixWallpaper() {
               transform: 'scale(1.15)',
               transformOrigin: 'center center',
             }}
-            allow="autoplay; encrypted-media"
-            loading="lazy"
+            allow="autoplay; fullscreen; encrypted-media"
+            loading="eager"
             onLoad={() => setIframeLoaded(true)}
             onError={() => {
               console.warn('Iframe wallpaper failed to load:', activeVideoUrl);
@@ -449,4 +449,4 @@ export function MatrixWallpaper() {
       </div>
     </div>
   );
-}
+});
