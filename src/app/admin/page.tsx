@@ -45,8 +45,9 @@ export default function AdminPage({ searchParams }: AdminPageProps) {
               {error === 'rate_limited' && 'Too many failed login attempts. Please wait before trying again.'}
               {error === 'missing_fields' && 'Please provide your administrator passphrase or email/password.'}
               {error === 'not_configured' && 'Cloud authentication service is not configured on this host.'}
+              {error === 'not_authorized' && 'This account is not authorized for administrator access.'}
               {error === 'server_error' && 'Server error verifying credentials. Please try again.'}
-              {!['session_required', 'invalid_credentials', 'rate_limited', 'missing_fields', 'not_configured', 'server_error'].includes(error) && error}
+              {!['session_required', 'invalid_credentials', 'rate_limited', 'missing_fields', 'not_configured', 'not_authorized', 'server_error'].includes(error) && error}
             </div>
           </div>
         )}

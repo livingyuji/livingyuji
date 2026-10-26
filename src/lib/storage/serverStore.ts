@@ -1,6 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { createServerClient, createServiceClient } from '@/lib/supabase/server';
+import {
+  assertSafeMediaUrl,
+  assertSafeVideoWallpaperUrl,
+} from '@/lib/validation/urls';
+import { isPublicShowcaseProject } from '@/lib/showcase/visibility';
 
 export interface SiteSettingsRecord {
   id: string;
@@ -57,6 +62,7 @@ export interface ShowcaseProjectRecord {
   screenshots?: string[];
   changelog?: any;
   install_guide?: string | null;
+  published?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -346,7 +352,14 @@ export function isServerlessReadOnlyEnvironment(): boolean {
 }
 
 function getStoreFilePath(): string {
-  return path.join(process.cwd(), 'data', 'admin-store.json');
+  // Test-only isolation: integration tests must never mutate the tracked
+  // development data file. Production and development ignore the override.
+  const testDataDir =
+    process.env.NODE_ENV === 'test' ? process.env.LIVINGYUJI_DATA_DIR?.trim() : undefined;
+  const dataDir = testDataDir
+    ? path.resolve(process.cwd(), testDataDir)
+    : path.join(process.cwd(), 'data');
+  return path.join(dataDir, 'admin-store.json');
 }
 
 /**
@@ -415,24 +428,184 @@ async function syncLocalStoreIfDev(updater: (store: AdminStoreData) => void): Pr
 }
 
 // ====================================================================
+// SHARED PERSISTENCE HELPERS
+// ====================================================================
+
+const PHASE_B_MIGRATION = 'supabase/migrations/20261026_phase_b_schema_storage_foundation.sql';
+const PHASE_C_MIGRATION = 'supabase/migrations/20261026_phase_c_showcase_access.sql';
+
+function isMissingRelationError(error: any): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return (
+    code === 'PGRST205' ||
+    code === '42P01' ||
+    /does not exist|schema cache|relation .* not found/i.test(message)
+  );
+}
+
+function databaseError(action: string, table: string, error: any): Error {
+  if (isMissingRelationError(error)) {
+    const migration = table === 'showcase_projects' ? PHASE_C_MIGRATION : PHASE_B_MIGRATION;
+    return new Error(
+      `Database table 'public.${table}' is unavailable while ${action}. Apply the prepared migration '${migration}' in Supabase before retrying.`
+    );
+  }
+
+  return new Error(
+    `Database error while ${action} in 'public.${table}': ${error?.message || 'Unknown database error'}`
+  );
+}
+
+function assertNoEphemeralUrl(value: unknown, field: string): void {
+  // Shared allowlist: absolute HTTP(S) URLs and same-origin root-relative
+  // paths only. This rejects blob:, local:, data:, javascript:, file:, and
+  // protocol-relative URLs before they reach Supabase or the JSON mirror.
+  assertSafeMediaUrl(value, field);
+}
+
+function assertSafeMediaList(values: unknown, field: string): void {
+  if (!Array.isArray(values)) return;
+  values.forEach((value, index) => {
+    assertSafeMediaUrl(value, `${field}[${index}]`);
+  });
+}
+
+function assertSafeRecordId(id: string, label: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) {
+    throw new Error(`${label} ID contains unsupported characters.`);
+  }
+  return id;
+}
+
+function hasOwn(value: Record<string, any>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function compactRecord<T extends Record<string, any>>(value: T): T {
+  const result: Record<string, any> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) result[key] = entry;
+  }
+  return result as T;
+}
+
+async function getReadClient() {
+  return (await createServiceClient()) || (await createServerClient());
+}
+
+async function listRows(
+  table: string,
+  orderColumn = 'created_at',
+  ascending = false
+): Promise<any[] | null> {
+  const supabase = await getReadClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .order(orderColumn, { ascending });
+
+  if (error) throw databaseError('reading records', table, error);
+  return Array.isArray(data) ? data : [];
+}
+
+async function readRowById(table: string, id: string): Promise<any | null> {
+  const supabase = await getReadClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw databaseError('reading a record', table, error);
+  return data || null;
+}
+
+function assertNoConfiguredBackendInProduction(): void {
+  if (isServerlessReadOnlyEnvironment()) {
+    throw new Error(
+      'Database connection is not configured in this production environment. The local JSON store is not shared production persistence.'
+    );
+  }
+}
+
+// ====================================================================
 // 1. SITE SETTINGS PERSISTENCE
 // ====================================================================
 
 export async function getSiteSettings(): Promise<{ settings: SiteSettingsRecord; source: 'supabase' | 'local_persistent' }> {
-  try {
-    const supabase = await createServerClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('site_settings').select('*').limit(1).maybeSingle();
-      if (!error && data) {
-        return { settings: data, source: 'supabase' };
-      }
-    }
-  } catch (err) {
-    console.warn('Supabase getSiteSettings error:', err);
+  const supabase = await getReadClient();
+  if (supabase) {
+    const { data, error } = await supabase.from('site_settings').select('*').limit(1).maybeSingle();
+    if (error) throw databaseError('reading site settings', 'site_settings', error);
+    if (data) return { settings: data as SiteSettingsRecord, source: 'supabase' };
+
+    // A reachable but empty settings table is authoritative. Do not replace it
+    // with a developer file or a seeded production record.
+    return { settings: DEFAULT_STORE.site_settings, source: 'supabase' };
   }
 
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
   return { settings: local.site_settings, source: 'local_persistent' };
+}
+
+const SITE_SETTINGS_COLUMNS: Array<keyof SiteSettingsRecord> = [
+  'brand_name',
+  'site_title',
+  'wallpaper',
+  'accent_color',
+  'theme',
+  'custom_logo_url',
+  'custom_favicon_url',
+  'custom_wallpaper_url',
+  'custom_video_wallpaper_url',
+  'video_wallpaper_muted',
+  'wallpaper_mode',
+  'wallpaper_opacity',
+];
+
+function sanitizeSiteSettingsUpdates(
+  updates: Partial<SiteSettingsRecord>
+): Partial<SiteSettingsRecord> {
+  const sanitized: Partial<SiteSettingsRecord> = {};
+
+  for (const column of SITE_SETTINGS_COLUMNS) {
+    if (!hasOwn(updates as Record<string, any>, column)) continue;
+    const value = updates[column];
+    if (value === undefined) continue;
+
+    if (column === 'wallpaper_opacity') {
+      const numeric = Number(value);
+      sanitized.wallpaper_opacity = Number.isFinite(numeric)
+        ? Math.min(100, Math.max(0, Math.round(numeric)))
+        : 85;
+      continue;
+    }
+
+    if (column === 'video_wallpaper_muted') {
+      sanitized.video_wallpaper_muted = value === true;
+      continue;
+    }
+
+    if (column === 'custom_video_wallpaper_url') {
+      assertSafeVideoWallpaperUrl(value, String(column));
+    } else if (
+      column === 'custom_wallpaper_url' ||
+      column === 'custom_logo_url' ||
+      column === 'custom_favicon_url'
+    ) {
+      assertSafeMediaUrl(value, String(column));
+    }
+
+    (sanitized as Record<string, any>)[column] = value;
+  }
+
+  return sanitized;
 }
 
 export async function saveSiteSettings(updates: Partial<SiteSettingsRecord>): Promise<{
@@ -440,27 +613,31 @@ export async function saveSiteSettings(updates: Partial<SiteSettingsRecord>): Pr
   destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
+  const safeUpdates = sanitizeSiteSettingsUpdates(updates);
   const supabase = await createServiceClient();
   if (supabase) {
     const current = await getSiteSettings();
     const merged: SiteSettingsRecord = {
       ...current.settings,
-      ...updates,
+      ...safeUpdates,
       id: 'default',
       updated_at: new Date().toISOString(),
     };
 
-    // 1. Attempt full schema upsert
+    // Attempt the complete schema first. The result is the authoritative
+    // persisted row; no fabricated success is returned on an error.
     const { data, error } = await supabase.from('site_settings').upsert(merged).select().single();
     if (!error && data) {
       await syncLocalStoreIfDev((store) => {
         store.site_settings = data;
       });
-      return { settings: data, destination: 'supabase_production' };
+      return { settings: data as SiteSettingsRecord, destination: 'supabase_production' };
     }
 
-    // 2. If column not found (e.g. PGRST204 for unmigrated video wallpaper columns), retry with base schema columns
-    if (error && error.code === 'PGRST204') {
+    // Older schemas lack the Phase B wallpaper columns. Save only the columns
+    // that actually exist, never copy a video URL into the image column, and
+    // report the partial persistence explicitly.
+    if (error && (error.code === 'PGRST204' || /column .* does not exist/i.test(error.message || ''))) {
       const basePayload = {
         id: 'default',
         brand_name: merged.brand_name,
@@ -470,43 +647,45 @@ export async function saveSiteSettings(updates: Partial<SiteSettingsRecord>): Pr
         theme: merged.theme,
         custom_logo_url: merged.custom_logo_url || null,
         custom_favicon_url: merged.custom_favicon_url || null,
-        custom_wallpaper_url: merged.custom_video_wallpaper_url || merged.custom_wallpaper_url || null,
+        custom_wallpaper_url: merged.custom_wallpaper_url || null,
         updated_at: merged.updated_at,
       };
 
       const retryRes = await supabase.from('site_settings').upsert(basePayload).select().single();
-      if (!retryRes.error && retryRes.data) {
-        const combinedSettings: SiteSettingsRecord = {
-          ...merged,
-          ...retryRes.data,
-        };
-        await syncLocalStoreIfDev((store) => {
-          store.site_settings = combinedSettings;
-        });
-        return {
-          settings: combinedSettings,
-          destination: 'supabase_production',
-          warning:
-            'Settings saved to Supabase. To persist dedicated video wallpaper columns in the cloud database, run migration 20261025_complete_setup.sql.',
-        };
+      if (retryRes.error || !retryRes.data) {
+        throw databaseError('saving site settings', 'site_settings', retryRes.error);
       }
-      throw new Error(`Database error saving site settings: ${retryRes.error?.message || 'Unknown database retry error'}`);
+
+      await syncLocalStoreIfDev((store) => {
+        store.site_settings = retryRes.data as SiteSettingsRecord;
+      });
+      return {
+        settings: retryRes.data as SiteSettingsRecord,
+        destination: 'supabase_production',
+        warning:
+          `Base branding was saved, but the dedicated video-wallpaper columns are not present in Supabase. ` +
+          `Apply '${PHASE_B_MIGRATION}' and save again to persist the video wallpaper settings.`,
+      };
     }
 
-    throw new Error(`Database error saving site settings: ${error?.message || 'Unknown database error'}`);
+    throw databaseError('saving site settings', 'site_settings', error);
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
+  assertNoConfiguredBackendInProduction();
 
   const local = await getLocalStore();
   const merged: SiteSettingsRecord = {
     ...local.site_settings,
-    ...updates,
+    ...safeUpdates,
     id: 'default',
     updated_at: new Date().toISOString(),
   };
+
+  assertSafeVideoWallpaperUrl(merged.custom_video_wallpaper_url, 'custom_video_wallpaper_url');
+  assertSafeMediaUrl(merged.custom_wallpaper_url, 'custom_wallpaper_url');
+  assertSafeMediaUrl(merged.custom_logo_url, 'custom_logo_url');
+  assertSafeMediaUrl(merged.custom_favicon_url, 'custom_favicon_url');
+
   local.site_settings = merged;
   await saveLocalStore(local);
   return { settings: merged, destination: 'local_persistent' };
@@ -517,18 +696,16 @@ export async function saveSiteSettings(updates: Partial<SiteSettingsRecord>): Pr
 // ====================================================================
 
 export async function getDiscordSettings(): Promise<{ settings: DiscordSettingsRecord; source: 'supabase' | 'local_persistent' }> {
-  try {
-    const supabase = await createServerClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('discord_settings').select('*').limit(1).maybeSingle();
-      if (!error && data) {
-        return { settings: data, source: 'supabase' };
-      }
-    }
-  } catch (err) {
-    console.warn('Supabase getDiscordSettings error:', err);
+  const supabase = await getReadClient();
+  if (supabase) {
+    const { data, error } = await supabase.from('discord_settings').select('*').limit(1).maybeSingle();
+    if (error) throw databaseError('reading Discord settings', 'discord_settings', error);
+    if (data) return { settings: data as DiscordSettingsRecord, source: 'supabase' };
+
+    return { settings: DEFAULT_STORE.discord_settings, source: 'supabase' };
   }
 
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
   return { settings: local.discord_settings, source: 'local_persistent' };
 }
@@ -556,7 +733,7 @@ export async function saveDiscordSettings(updates: Partial<DiscordSettingsRecord
       return { settings: data, destination: 'supabase_production' };
     }
 
-    throw new Error(`Database error saving Discord settings: ${error?.message || 'Unknown database error'}`);
+    throw databaseError('saving Discord settings', 'discord_settings', error);
   }
 
   if (isServerlessReadOnlyEnvironment()) {
@@ -579,81 +756,163 @@ export async function saveDiscordSettings(updates: Partial<DiscordSettingsRecord
 // 3. SHOWCASE PROJECTS PERSISTENCE
 // ====================================================================
 
-export async function getShowcaseProjects(): Promise<{ projects: ShowcaseProjectRecord[]; source: 'supabase' | 'local_persistent' }> {
-  try {
-    const supabase = await createServerClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('showcase_projects').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        return { projects: data, source: 'supabase' };
-      }
+function normalizeShowcaseProjectInput(
+  input: Partial<ShowcaseProjectRecord> & Record<string, any>
+): Partial<ShowcaseProjectRecord> {
+  const normalized: Partial<ShowcaseProjectRecord> = {};
+
+  const stringFields: Array<[string, keyof ShowcaseProjectRecord]> = [
+    ['title', 'title'],
+    ['slug', 'slug'],
+    ['category_id', 'category_id'],
+    ['category', 'category_id'],
+    ['summary', 'summary'],
+    ['short_description', 'summary'],
+    ['description', 'description'],
+    ['version', 'version'],
+    ['gradient_bg', 'gradient_bg'],
+    ['gradientBg', 'gradient_bg'],
+    ['icon_symbol', 'icon_symbol'],
+    ['iconSymbol', 'icon_symbol'],
+    ['install_guide', 'install_guide'],
+    ['created_at', 'created_at'],
+    ['createdAt', 'created_at'],
+  ];
+
+  for (const [source, target] of stringFields) {
+    if (hasOwn(input, source) && input[source] !== undefined) {
+      (normalized as Record<string, any>)[target] = input[source];
     }
-  } catch (err) {
-    console.warn('Supabase getShowcaseProjects error:', err);
   }
 
-  const local = await getLocalStore();
-  return { projects: local.showcase_projects, source: 'local_persistent' };
+  for (const field of ['features', 'technologies', 'screenshots'] as const) {
+    if (hasOwn(input, field) && input[field] !== undefined) {
+      normalized[field] = Array.isArray(input[field]) ? input[field] : [];
+    }
+  }
+
+  if (hasOwn(input, 'status') && input.status !== undefined) normalized.status = input.status;
+  if (hasOwn(input, 'featured') && input.featured !== undefined) normalized.featured = input.featured === true;
+  if (hasOwn(input, 'is_free') && input.is_free !== undefined) normalized.is_free = input.is_free !== false;
+  if (hasOwn(input, 'isFree') && input.isFree !== undefined) normalized.is_free = input.isFree !== false;
+  if (hasOwn(input, 'published') && input.published !== undefined) normalized.published = input.published === true;
+  if (hasOwn(input, 'price') && input.price !== undefined) {
+    normalized.price = Number(input.price) || 0;
+  }
+  if (hasOwn(input, 'links') && input.links !== undefined) normalized.links = input.links || {};
+  if (hasOwn(input, 'compatibility') && input.compatibility !== undefined) {
+    normalized.compatibility = input.compatibility || {};
+  }
+  if (hasOwn(input, 'changelog') && input.changelog !== undefined) normalized.changelog = input.changelog;
+
+  return normalized;
 }
 
-export async function saveShowcaseProject(project: Partial<ShowcaseProjectRecord>): Promise<{
+export async function getShowcaseProjects(
+  isAdmin = false
+): Promise<{ projects: ShowcaseProjectRecord[]; source: 'supabase' | 'local_persistent' }> {
+  const rows = await listRows('showcase_projects');
+  if (rows) {
+    const projects = rows as ShowcaseProjectRecord[];
+    return {
+      projects: isAdmin ? projects : projects.filter(isPublicShowcaseProject),
+      source: 'supabase',
+    };
+  }
+
+  assertNoConfiguredBackendInProduction();
+  const local = await getLocalStore();
+  return {
+    projects: isAdmin ? local.showcase_projects : local.showcase_projects.filter(isPublicShowcaseProject),
+    source: 'local_persistent',
+  };
+}
+
+export async function saveShowcaseProject(
+  project: Partial<ShowcaseProjectRecord>,
+  options: { preserveExisting?: boolean } = {}
+): Promise<{
   project: ShowcaseProjectRecord;
   destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const id = project.id || `proj-${Date.now()}`;
+  const input = project as Partial<ShowcaseProjectRecord> & Record<string, any>;
+  const updates = normalizeShowcaseProjectInput(input);
+  assertSafeMediaList(updates.screenshots, 'screenshots');
+  const id = assertSafeRecordId(String(input.id || `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`), 'Project');
   const now = new Date().toISOString();
+  const preserveExisting = options.preserveExisting !== false;
 
+  const supabase = await createServiceClient();
+  let existing: ShowcaseProjectRecord | null = null;
+  if (preserveExisting) {
+    if (supabase) {
+      existing = (await readRowById('showcase_projects', id)) as ShowcaseProjectRecord | null;
+    } else {
+      assertNoConfiguredBackendInProduction();
+      const local = await getLocalStore();
+      existing = local.showcase_projects.find((entry) => entry.id === id) || null;
+    }
+  } else if (!supabase) {
+    assertNoConfiguredBackendInProduction();
+  }
+
+  const title = String(updates.title ?? existing?.title ?? 'Untitled Project').trim();
   const record: ShowcaseProjectRecord = {
+    ...existing,
     id,
-    title: (project.title || 'Untitled Project').trim(),
+    title: title || 'Untitled Project',
     slug:
-      project.slug ||
-      (project.title || 'untitled')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)+/g, ''),
-    category_id: project.category_id || 'web-apps',
-    summary: project.summary || '',
-    description: project.description || '',
-    features: Array.isArray(project.features) ? project.features : [],
-    technologies: Array.isArray(project.technologies) ? project.technologies : [],
-    status: project.status || 'Released',
-    featured: project.featured === true,
-    is_free: project.is_free !== false,
-    price: typeof project.price === 'number' ? project.price : Number(project.price) || 0,
-    version: project.version || 'v1.0.0',
-    gradient_bg: project.gradient_bg || 'from-blue-600 to-indigo-900',
-    icon_symbol: project.icon_symbol || '⚡',
-    links: project.links || {},
-    compatibility: project.compatibility || {},
-    screenshots: Array.isArray(project.screenshots) ? project.screenshots : [],
-    changelog: project.changelog || [],
-    install_guide: project.install_guide || null,
-    created_at: project.created_at || now,
+      String(
+        updates.slug ??
+          existing?.slug ??
+          title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)+/g, '')
+      ) || `project-${id}`,
+    category_id: String(updates.category_id ?? existing?.category_id ?? 'web-apps'),
+    summary: String(updates.summary ?? existing?.summary ?? ''),
+    description: String(updates.description ?? existing?.description ?? ''),
+    features: updates.features ?? existing?.features ?? [],
+    technologies: updates.technologies ?? existing?.technologies ?? [],
+    status: String(updates.status ?? existing?.status ?? 'Released'),
+    featured: updates.featured ?? existing?.featured ?? false,
+    is_free: updates.is_free ?? existing?.is_free ?? true,
+    price: updates.price ?? existing?.price ?? 0,
+    version: String(updates.version ?? existing?.version ?? 'v1.0.0'),
+    gradient_bg: String(updates.gradient_bg ?? existing?.gradient_bg ?? 'from-blue-600 to-indigo-900'),
+    icon_symbol: String(updates.icon_symbol ?? existing?.icon_symbol ?? '⚡'),
+    links: updates.links ?? existing?.links ?? {},
+    compatibility: updates.compatibility ?? existing?.compatibility ?? {},
+    screenshots: updates.screenshots ?? existing?.screenshots ?? [],
+    changelog: updates.changelog ?? existing?.changelog ?? '',
+    install_guide: updates.install_guide ?? existing?.install_guide ?? null,
+    created_at: existing?.created_at ?? updates.created_at ?? now,
     updated_at: now,
   };
 
-  const supabase = await createServiceClient();
-  if (supabase) {
-    const { data, error } = await supabase.from('showcase_projects').upsert(record).select().single();
-    if (!error && data) {
-      await syncLocalStoreIfDev((store) => {
-        const idx = store.showcase_projects.findIndex((p) => p.id === id);
-        if (idx >= 0) store.showcase_projects[idx] = data;
-        else store.showcase_projects.unshift(data);
-      });
-      return { project: data, destination: 'supabase_production' };
-    }
-    throw new Error(`Database error saving showcase project: ${error?.message || 'Unknown database error'}`);
-  }
+  if (updates.published !== undefined) record.published = updates.published;
+  else if (existing?.published !== undefined) record.published = existing.published;
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('showcase_projects')
+      .upsert(compactRecord(record))
+      .select()
+      .single();
+    if (error || !data) throw databaseError('saving a showcase project', 'showcase_projects', error);
+
+    await syncLocalStoreIfDev((store) => {
+      const idx = store.showcase_projects.findIndex((entry) => entry.id === id);
+      if (idx >= 0) store.showcase_projects[idx] = data as ShowcaseProjectRecord;
+      else store.showcase_projects.unshift(data as ShowcaseProjectRecord);
+    });
+    return { project: data as ShowcaseProjectRecord, destination: 'supabase_production' };
   }
 
   const local = await getLocalStore();
-  const existingIdx = local.showcase_projects.findIndex((p) => p.id === id);
+  const existingIdx = local.showcase_projects.findIndex((entry) => entry.id === id);
   if (existingIdx >= 0) local.showcase_projects[existingIdx] = record;
   else local.showcase_projects.unshift(record);
   await saveLocalStore(local);
@@ -661,47 +920,191 @@ export async function saveShowcaseProject(project: Partial<ShowcaseProjectRecord
 }
 
 export async function deleteShowcaseProject(id: string): Promise<{ success: boolean; error?: string }> {
+  assertSafeRecordId(id, 'Project');
   const supabase = await createServiceClient();
   if (supabase) {
-    const { error } = await supabase.from('showcase_projects').delete().eq('id', id);
-    if (error) {
-      throw new Error(`Database error deleting showcase project: ${error.message}`);
+    const { data, error } = await supabase
+      .from('showcase_projects')
+      .delete()
+      .eq('id', id)
+      .select('id');
+    if (error) throw databaseError('deleting a showcase project', 'showcase_projects', error);
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error(`Project '${id}' was not found; nothing was deleted.`);
     }
+
     await syncLocalStoreIfDev((store) => {
-      store.showcase_projects = store.showcase_projects.filter((p) => p.id !== id);
+      store.showcase_projects = store.showcase_projects.filter((entry) => entry.id !== id);
     });
     return { success: true };
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
-
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  local.showcase_projects = local.showcase_projects.filter((p) => p.id !== id);
+  const before = local.showcase_projects.length;
+  local.showcase_projects = local.showcase_projects.filter((entry) => entry.id !== id);
+  if (local.showcase_projects.length === before) {
+    throw new Error(`Project '${id}' was not found; nothing was deleted.`);
+  }
   await saveLocalStore(local);
   return { success: true };
+}
+
+export async function resetShowcaseProjects(projects: Partial<ShowcaseProjectRecord>[]): Promise<{
+  projects: ShowcaseProjectRecord[];
+  destination: 'supabase_production' | 'local_persistent';
+}> {
+  if (!Array.isArray(projects) || projects.length === 0) {
+    throw new Error('Reset requires a non-empty list of default projects.');
+  }
+
+  const saved: ShowcaseProjectRecord[] = [];
+  for (const project of projects) {
+    // A reset means restoring the canonical defaults, not merging arbitrary
+    // fields left behind by a previous edit. `preserveExisting: false` also
+    // resets fields the client does not explicitly send.
+    let result = await saveShowcaseProject(project, { preserveExisting: false });
+
+    // If the optional Phase C `published` column exists, an upsert that omits
+    // it would leave an old unpublished row hidden. Restore the default
+    // visibility explicitly without making the reset fail on Phase B-only
+    // schemas where the column does not exist yet.
+    if (project.published !== false && result.project.published === false) {
+      result = await saveShowcaseProject(
+        { ...project, published: true },
+        { preserveExisting: false }
+      );
+    }
+    saved.push(result.project);
+  }
+
+  const keepIds = new Set(saved.map((project) => project.id));
+  const supabase = await createServiceClient();
+  if (supabase) {
+    const { data: existing, error } = await supabase.from('showcase_projects').select('id');
+    if (error) throw databaseError('reading showcase projects during reset', 'showcase_projects', error);
+    const removeIds = (Array.isArray(existing) ? existing : [])
+      .map((entry: any) => String(entry.id))
+      .filter((id: string) => !keepIds.has(id));
+    if (removeIds.length > 0) {
+      const { data: deleted, error: deleteError } = await supabase
+        .from('showcase_projects')
+        .delete()
+        .in('id', removeIds)
+        .select('id');
+      if (deleteError) {
+        throw databaseError('removing extra projects during reset', 'showcase_projects', deleteError);
+      }
+      if (!Array.isArray(deleted) || deleted.length !== removeIds.length) {
+        throw new Error('Showcase reset was incomplete. No success was reported because verification failed.');
+      }
+    }
+    return { projects: saved, destination: 'supabase_production' };
+  }
+
+  assertNoConfiguredBackendInProduction();
+  const local = await getLocalStore();
+  local.showcase_projects = saved;
+  await saveLocalStore(local);
+  return { projects: saved, destination: 'local_persistent' };
 }
 
 // ====================================================================
 // 4. MINECRAFT PRODUCTS PERSISTENCE
 // ====================================================================
 
-export async function getMinecraftProducts(): Promise<{ products: MinecraftProductRecord[]; source: 'supabase' | 'local_persistent' }> {
-  try {
-    const supabase = await createServerClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('minecraft_products').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        return { products: data, source: 'supabase' };
-      }
+function normalizeMinecraftProductInput(
+  input: Partial<MinecraftProductRecord> & Record<string, any>
+): Partial<MinecraftProductRecord> {
+  const normalized: Partial<MinecraftProductRecord> = {};
+
+  const stringFields: Array<[string, keyof MinecraftProductRecord]> = [
+    ['name', 'name'],
+    ['category', 'category'],
+    ['category_name', 'category_name'],
+    ['categoryName', 'category_name'],
+    ['short_desc', 'short_desc'],
+    ['shortDesc', 'short_desc'],
+    ['full_desc', 'full_desc'],
+    ['fullDesc', 'full_desc'],
+    ['version', 'version'],
+    ['changelog', 'changelog'],
+    ['file_format', 'file_format'],
+    ['fileFormat', 'file_format'],
+    ['file_size', 'file_size'],
+    ['fileSize', 'file_size'],
+    ['creator', 'creator'],
+    ['icon_bg', 'icon_bg'],
+    ['iconBg', 'icon_bg'],
+    ['icon_symbol', 'icon_symbol'],
+    ['iconSymbol', 'icon_symbol'],
+    ['download_url', 'download_url'],
+    ['downloadUrl', 'download_url'],
+    ['direct_file_path', 'direct_file_path'],
+    ['directFilePath', 'direct_file_path'],
+    ['created_at', 'created_at'],
+    ['createdAt', 'created_at'],
+  ];
+
+  for (const [source, target] of stringFields) {
+    if (hasOwn(input, source) && input[source] !== undefined) {
+      (normalized as Record<string, any>)[target] = input[source];
     }
-  } catch (err) {
-    console.warn('Supabase getMinecraftProducts error:', err);
   }
 
+  const arrayFields: Array<[string, keyof MinecraftProductRecord]> = [
+    ['mc_versions', 'mc_versions'],
+    ['mcVersions', 'mc_versions'],
+    ['server_software', 'server_software'],
+    ['serverSoftware', 'server_software'],
+    ['dependencies', 'dependencies'],
+    ['features', 'features'],
+    ['installation_steps', 'installation_steps'],
+    ['installationSteps', 'installation_steps'],
+  ];
+  for (const [source, target] of arrayFields) {
+    if (hasOwn(input, source) && input[source] !== undefined) {
+      (normalized as Record<string, any>)[target] = Array.isArray(input[source]) ? input[source] : [];
+    }
+  }
+
+  if (hasOwn(input, 'price') && input.price !== undefined) normalized.price = Number(input.price) || 0;
+  if (hasOwn(input, 'is_free') && input.is_free !== undefined) normalized.is_free = input.is_free !== false;
+  if (hasOwn(input, 'isFree') && input.isFree !== undefined) normalized.is_free = input.isFree !== false;
+  if (hasOwn(input, 'published') && input.published !== undefined) normalized.published = input.published === true;
+  if (hasOwn(input, 'featured') && input.featured !== undefined) normalized.featured = input.featured === true;
+  if (hasOwn(input, 'rating') && input.rating !== undefined) {
+    const rating = Number(input.rating);
+    normalized.rating = Number.isFinite(rating) ? rating : 5;
+  }
+  if (hasOwn(input, 'downloads_count') && input.downloads_count !== undefined) {
+    normalized.downloads_count = Number(input.downloads_count) || 0;
+  }
+  if (hasOwn(input, 'downloadsCount') && input.downloadsCount !== undefined) {
+    normalized.downloads_count = Number(input.downloadsCount) || 0;
+  }
+
+  return normalized;
+}
+
+export async function getMinecraftProducts(
+  isAdmin = false
+): Promise<{ products: MinecraftProductRecord[]; source: 'supabase' | 'local_persistent' }> {
+  const rows = await listRows('minecraft_products');
+  if (rows) {
+    const products = rows as MinecraftProductRecord[];
+    return {
+      products: isAdmin ? products : products.filter((product) => product.published !== false),
+      source: 'supabase',
+    };
+  }
+
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  return { products: local.minecraft_products, source: 'local_persistent' };
+  return {
+    products: isAdmin ? local.minecraft_products : local.minecraft_products.filter((product) => product.published !== false),
+    source: 'local_persistent',
+  };
 }
 
 export async function saveMinecraftProduct(product: Partial<MinecraftProductRecord>): Promise<{
@@ -709,60 +1112,75 @@ export async function saveMinecraftProduct(product: Partial<MinecraftProductReco
   destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const id = product.id || `prod-${Date.now()}`;
+  const input = product as Partial<MinecraftProductRecord> & Record<string, any>;
+  const updates = normalizeMinecraftProductInput(input);
+  assertNoEphemeralUrl(updates.download_url, 'download_url');
+  const id = assertSafeRecordId(String(input.id || `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`), 'Product');
   const now = new Date().toISOString();
 
+  const supabase = await createServiceClient();
+  let existing: MinecraftProductRecord | null = null;
+  if (supabase) {
+    existing = (await readRowById('minecraft_products', id)) as MinecraftProductRecord | null;
+  } else {
+    assertNoConfiguredBackendInProduction();
+    const local = await getLocalStore();
+    existing = local.minecraft_products.find((entry) => entry.id === id) || null;
+  }
+
+  const price = updates.price ?? existing?.price ?? 0;
+  const isFree = updates.is_free ?? (hasOwn(updates, 'price') ? price === 0 : existing?.is_free ?? price === 0);
+
   const record: MinecraftProductRecord = {
+    ...existing,
     id,
-    name: (product.name || 'Untitled Resource').trim(),
-    category: product.category || 'plugins',
-    category_name: product.category_name || 'Plugins',
-    short_desc: product.short_desc || '',
-    full_desc: product.full_desc || '',
-    price: typeof product.price === 'number' ? product.price : Number(product.price) || 0,
-    is_free: product.is_free !== false && (product.price === 0 || !product.price),
-    version: product.version || 'v1.0.0',
-    mc_versions: Array.isArray(product.mc_versions) ? product.mc_versions : ['1.21.4'],
-    server_software: Array.isArray(product.server_software) ? product.server_software : ['Paper', 'Purpur'],
-    dependencies: Array.isArray(product.dependencies) ? product.dependencies : [],
-    features: Array.isArray(product.features) ? product.features : [],
-    installation_steps: Array.isArray(product.installation_steps) ? product.installation_steps : [],
-    changelog: product.changelog || '',
-    file_format: product.file_format || '.jar',
-    file_size: product.file_size || '1.0 MB',
-    creator: product.creator || 'LivingYuji',
-    published: product.published !== false,
-    featured: product.featured === true,
-    rating: typeof product.rating === 'number' ? product.rating : 5.0,
-    downloads_count: typeof product.downloads_count === 'number' ? product.downloads_count : 0,
-    icon_bg: product.icon_bg || 'from-blue-600 to-indigo-900',
-    icon_symbol: product.icon_symbol || '⚡',
-    download_url: product.download_url || null,
-    direct_file_path: product.direct_file_path || null,
-    created_at: product.created_at || now,
+    name: String(updates.name ?? existing?.name ?? 'Untitled Resource').trim() || 'Untitled Resource',
+    category: String(updates.category ?? existing?.category ?? 'plugins'),
+    category_name: String(updates.category_name ?? existing?.category_name ?? 'Plugins'),
+    short_desc: String(updates.short_desc ?? existing?.short_desc ?? ''),
+    full_desc: String(updates.full_desc ?? existing?.full_desc ?? ''),
+    price,
+    is_free: isFree,
+    version: String(updates.version ?? existing?.version ?? 'v1.0.0'),
+    mc_versions: updates.mc_versions ?? existing?.mc_versions ?? ['1.21.4'],
+    server_software: updates.server_software ?? existing?.server_software ?? ['Paper', 'Purpur'],
+    dependencies: updates.dependencies ?? existing?.dependencies ?? [],
+    features: updates.features ?? existing?.features ?? [],
+    installation_steps: updates.installation_steps ?? existing?.installation_steps ?? [],
+    changelog: String(updates.changelog ?? existing?.changelog ?? ''),
+    file_format: String(updates.file_format ?? existing?.file_format ?? '.jar'),
+    file_size: String(updates.file_size ?? existing?.file_size ?? '1.0 MB'),
+    creator: String(updates.creator ?? existing?.creator ?? 'LivingYuji'),
+    published: updates.published ?? existing?.published ?? true,
+    featured: updates.featured ?? existing?.featured ?? false,
+    rating: updates.rating ?? existing?.rating ?? 5,
+    downloads_count: updates.downloads_count ?? existing?.downloads_count ?? 0,
+    icon_bg: String(updates.icon_bg ?? existing?.icon_bg ?? 'from-blue-600 to-indigo-900'),
+    icon_symbol: String(updates.icon_symbol ?? existing?.icon_symbol ?? '⚡'),
+    download_url: updates.download_url ?? existing?.download_url ?? null,
+    direct_file_path: updates.direct_file_path ?? existing?.direct_file_path ?? null,
+    created_at: existing?.created_at ?? updates.created_at ?? now,
     updated_at: now,
   };
 
-  const supabase = await createServiceClient();
   if (supabase) {
-    const { data, error } = await supabase.from('minecraft_products').upsert(record).select().single();
-    if (!error && data) {
-      await syncLocalStoreIfDev((store) => {
-        const idx = store.minecraft_products.findIndex((p) => p.id === id);
-        if (idx >= 0) store.minecraft_products[idx] = data;
-        else store.minecraft_products.unshift(data);
-      });
-      return { product: data, destination: 'supabase_production' };
-    }
-    throw new Error(`Database error saving Minecraft product: ${error?.message || 'Unknown database error'}`);
-  }
+    const { data, error } = await supabase
+      .from('minecraft_products')
+      .upsert(compactRecord(record))
+      .select()
+      .single();
+    if (error || !data) throw databaseError('saving a Minecraft product', 'minecraft_products', error);
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
+    await syncLocalStoreIfDev((store) => {
+      const idx = store.minecraft_products.findIndex((entry) => entry.id === id);
+      if (idx >= 0) store.minecraft_products[idx] = data as MinecraftProductRecord;
+      else store.minecraft_products.unshift(data as MinecraftProductRecord);
+    });
+    return { product: data as MinecraftProductRecord, destination: 'supabase_production' };
   }
 
   const local = await getLocalStore();
-  const existingIdx = local.minecraft_products.findIndex((p) => p.id === id);
+  const existingIdx = local.minecraft_products.findIndex((entry) => entry.id === id);
   if (existingIdx >= 0) local.minecraft_products[existingIdx] = record;
   else local.minecraft_products.unshift(record);
   await saveLocalStore(local);
@@ -770,24 +1188,32 @@ export async function saveMinecraftProduct(product: Partial<MinecraftProductReco
 }
 
 export async function deleteMinecraftProduct(id: string): Promise<{ success: boolean; error?: string }> {
+  assertSafeRecordId(id, 'Product');
   const supabase = await createServiceClient();
   if (supabase) {
-    const { error } = await supabase.from('minecraft_products').delete().eq('id', id);
-    if (error) {
-      throw new Error(`Database error deleting Minecraft product: ${error.message}`);
+    const { data, error } = await supabase
+      .from('minecraft_products')
+      .delete()
+      .eq('id', id)
+      .select('id');
+    if (error) throw databaseError('deleting a Minecraft product', 'minecraft_products', error);
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error(`Product '${id}' was not found; nothing was deleted.`);
     }
+
     await syncLocalStoreIfDev((store) => {
-      store.minecraft_products = store.minecraft_products.filter((p) => p.id !== id);
+      store.minecraft_products = store.minecraft_products.filter((entry) => entry.id !== id);
     });
     return { success: true };
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
-
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  local.minecraft_products = local.minecraft_products.filter((p) => p.id !== id);
+  const before = local.minecraft_products.length;
+  local.minecraft_products = local.minecraft_products.filter((entry) => entry.id !== id);
+  if (local.minecraft_products.length === before) {
+    throw new Error(`Product '${id}' was not found; nothing was deleted.`);
+  }
   await saveLocalStore(local);
   return { success: true };
 }
@@ -796,26 +1222,92 @@ export async function deleteMinecraftProduct(id: string): Promise<{ success: boo
 // 5. MUSIC TRACKS PERSISTENCE
 // ====================================================================
 
-export async function getMusicTracks(isAdmin: boolean): Promise<{ tracks: MusicTrackRecord[]; source: 'supabase' | 'local_persistent' }> {
-  try {
-    const supabase = await createServerClient();
-    if (supabase) {
-      let query = supabase.from('music_tracks').select('*').order('track_order', { ascending: true });
-      if (!isAdmin) {
-        query = query.eq('published', true);
-      }
-      const { data, error } = await query;
-      if (!error && data && data.length > 0) {
-        return { tracks: data, source: 'supabase' };
-      }
+function normalizeMusicTrackInput(
+  input: Partial<MusicTrackRecord> & Record<string, any>
+): Partial<MusicTrackRecord> {
+  const normalized: Partial<MusicTrackRecord> = {};
+
+  const stringFields: Array<[string, keyof MusicTrackRecord]> = [
+    ['title', 'title'],
+    ['artist', 'artist'],
+    ['album', 'album'],
+    ['duration', 'duration'],
+    ['genre', 'genre'],
+    ['description', 'description'],
+    ['audio_url', 'audio_url'],
+    ['audioUrl', 'audio_url'],
+    ['cover_url', 'cover_url'],
+    ['coverUrl', 'cover_url'],
+    ['cover_gradient', 'cover_gradient'],
+    ['coverGradient', 'cover_gradient'],
+    ['file_format', 'file_format'],
+    ['fileFormat', 'file_format'],
+    ['file_size', 'file_size'],
+    ['fileSize', 'file_size'],
+    ['created_at', 'created_at'],
+    ['createdAt', 'created_at'],
+  ];
+
+  for (const [source, target] of stringFields) {
+    if (hasOwn(input, source) && input[source] !== undefined) {
+      (normalized as Record<string, any>)[target] = input[source];
     }
-  } catch (err) {
-    console.warn('Supabase getMusicTracks error:', err);
   }
 
+  if (hasOwn(input, 'duration_sec') && input.duration_sec !== undefined) {
+    normalized.duration_sec = Number(input.duration_sec) || 180;
+  }
+  if (hasOwn(input, 'durationSec') && input.durationSec !== undefined) {
+    normalized.duration_sec = Number(input.durationSec) || 180;
+  }
+  if (hasOwn(input, 'tags') && input.tags !== undefined) {
+    normalized.tags = Array.isArray(input.tags) ? input.tags : [];
+  }
+  if (hasOwn(input, 'published') && input.published !== undefined) {
+    normalized.published = input.published === true;
+  }
+  if (hasOwn(input, 'featured') && input.featured !== undefined) {
+    normalized.featured = input.featured === true;
+  }
+  if (hasOwn(input, 'track_order') && input.track_order !== undefined) {
+    normalized.track_order = Number(input.track_order) || 99;
+  }
+  if (hasOwn(input, 'trackOrder') && input.trackOrder !== undefined) {
+    normalized.track_order = Number(input.trackOrder) || 99;
+  }
+
+  return normalized;
+}
+
+function assertDurableMusicUrls(track: Partial<MusicTrackRecord>): void {
+  if (hasOwn(track as Record<string, any>, 'audio_url')) {
+    assertNoEphemeralUrl(track.audio_url, 'audio_url');
+  }
+  if (hasOwn(track as Record<string, any>, 'cover_url')) {
+    assertNoEphemeralUrl(track.cover_url, 'cover_url');
+  }
+}
+
+export async function getMusicTracks(
+  isAdmin = false
+): Promise<{ tracks: MusicTrackRecord[]; source: 'supabase' | 'local_persistent' }> {
+  const rows = await listRows('music_tracks', 'track_order', true);
+  if (rows) {
+    const tracks = rows as MusicTrackRecord[];
+    return {
+      // The service-role read intentionally returns all rows so public
+      // filtering is an application concern rather than a Storage/RLS leak.
+      tracks: isAdmin ? tracks : tracks.filter((track) => track.published === true),
+      source: 'supabase',
+    };
+  }
+
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  const filtered = isAdmin ? local.music_tracks : local.music_tracks.filter((t) => t.published);
-  return { tracks: filtered, source: 'local_persistent' };
+  return {
+    tracks: isAdmin ? local.music_tracks : local.music_tracks.filter((track) => track.published === true),
+    source: 'local_persistent',
+  };
 }
 
 export async function saveMusicTrack(track: Partial<MusicTrackRecord>): Promise<{
@@ -823,58 +1315,64 @@ export async function saveMusicTrack(track: Partial<MusicTrackRecord>): Promise<
   destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const id = track.id || `track-${Date.now()}`;
+  const input = track as Partial<MusicTrackRecord> & Record<string, any>;
+  const updates = normalizeMusicTrackInput(input);
+  assertDurableMusicUrls(updates);
+
+  const id = assertSafeRecordId(String(input.id || `track-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`), 'Track');
   const now = new Date().toISOString();
 
+  const supabase = await createServiceClient();
+  let existing: MusicTrackRecord | null = null;
+  if (supabase) {
+    existing = (await readRowById('music_tracks', id)) as MusicTrackRecord | null;
+  } else {
+    assertNoConfiguredBackendInProduction();
+    const local = await getLocalStore();
+    existing = local.music_tracks.find((entry) => entry.id === id) || null;
+  }
+
   const record: MusicTrackRecord = {
+    ...existing,
     id,
-    title: (track.title || 'Untitled Track').trim(),
-    artist: (track.artist || 'LivingYuji').trim(),
-    album: (track.album || 'Single & Releases').trim(),
-    duration: track.duration || '3:00',
-    duration_sec: Number(track.duration_sec) || 180,
-    genre: track.genre || 'Cyber Lo-Fi',
-    description: track.description || '',
-    tags: Array.isArray(track.tags) ? track.tags : [],
-    audio_url: track.audio_url || '',
-    cover_url: track.cover_url || null,
-    cover_gradient: track.cover_gradient || 'from-emerald-900 via-teal-950 to-slate-950',
-    published: track.published !== false,
-    featured: track.featured === true,
-    track_order: Number(track.track_order) || 99,
-    file_format: (track.file_format || 'mp3').toLowerCase(),
-    file_size: track.file_size || '3 MB',
-    created_at: track.created_at || now,
+    title: String(updates.title ?? existing?.title ?? 'Untitled Track').trim() || 'Untitled Track',
+    artist: String(updates.artist ?? existing?.artist ?? 'LivingYuji').trim() || 'LivingYuji',
+    album: String(updates.album ?? existing?.album ?? 'Single & Releases').trim() || 'Single & Releases',
+    duration: String(updates.duration ?? existing?.duration ?? '3:00'),
+    duration_sec: updates.duration_sec ?? existing?.duration_sec ?? 180,
+    genre: String(updates.genre ?? existing?.genre ?? 'Cyber Lo-Fi'),
+    description: String(updates.description ?? existing?.description ?? ''),
+    tags: updates.tags ?? existing?.tags ?? [],
+    audio_url: String(updates.audio_url ?? existing?.audio_url ?? ''),
+    cover_url: updates.cover_url ?? existing?.cover_url ?? null,
+    cover_gradient: String(
+      updates.cover_gradient ?? existing?.cover_gradient ?? 'from-emerald-900 via-teal-950 to-slate-950'
+    ),
+    published: updates.published ?? existing?.published ?? true,
+    featured: updates.featured ?? existing?.featured ?? false,
+    track_order: updates.track_order ?? existing?.track_order ?? 99,
+    file_format: String(updates.file_format ?? existing?.file_format ?? 'mp3').toLowerCase(),
+    file_size: String(updates.file_size ?? existing?.file_size ?? '3 MB'),
+    created_at: existing?.created_at ?? updates.created_at ?? now,
     updated_at: now,
   };
 
-  const supabase = await createServiceClient();
+  assertDurableMusicUrls(record);
+
   if (supabase) {
-    const { data, error } = await supabase.from('music_tracks').upsert(record).select().single();
-    if (!error && data) {
-      await syncLocalStoreIfDev((store) => {
-        const idx = store.music_tracks.findIndex((t) => t.id === id);
-        if (idx >= 0) store.music_tracks[idx] = data;
-        else store.music_tracks.push(data);
-      });
-      return { track: data, destination: 'supabase_production' };
-    }
+    const { data, error } = await supabase.from('music_tracks').upsert(compactRecord(record)).select().single();
+    if (error || !data) throw databaseError('saving a music track', 'music_tracks', error);
 
-    if (error && error.code === 'PGRST205') {
-      throw new Error(
-        `Database table 'public.music_tracks' does not exist in Supabase. Please run the SQL migration 'supabase/migrations/20261025_complete_setup.sql' in your Supabase SQL Editor to enable durable cloud music storage.`
-      );
-    }
-
-    throw new Error(`Database error saving music track: ${error?.message || 'Unknown database error'}`);
-  }
-
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
+    await syncLocalStoreIfDev((store) => {
+      const idx = store.music_tracks.findIndex((entry) => entry.id === id);
+      if (idx >= 0) store.music_tracks[idx] = data as MusicTrackRecord;
+      else store.music_tracks.push(data as MusicTrackRecord);
+    });
+    return { track: data as MusicTrackRecord, destination: 'supabase_production' };
   }
 
   const local = await getLocalStore();
-  const existingIdx = local.music_tracks.findIndex((t) => t.id === id);
+  const existingIdx = local.music_tracks.findIndex((entry) => entry.id === id);
   if (existingIdx >= 0) local.music_tracks[existingIdx] = record;
   else local.music_tracks.push(record);
   await saveLocalStore(local);
@@ -886,65 +1384,74 @@ export async function updateMusicTrack(id: string, updates: Partial<MusicTrackRe
   destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const merged: Partial<MusicTrackRecord> = {
-    ...updates,
-    id,
-    updated_at: new Date().toISOString(),
-  };
+  assertSafeRecordId(id, 'Track');
+  const normalized = normalizeMusicTrackInput(updates as Partial<MusicTrackRecord> & Record<string, any>);
+  assertDurableMusicUrls(normalized);
 
   const supabase = await createServiceClient();
   if (supabase) {
-    const { data, error } = await supabase.from('music_tracks').update(merged).eq('id', id).select().single();
-    if (!error && data) {
-      await syncLocalStoreIfDev((store) => {
-        const idx = store.music_tracks.findIndex((t) => t.id === id);
-        if (idx >= 0) store.music_tracks[idx] = { ...store.music_tracks[idx], ...data };
-      });
-      return { track: data, destination: 'supabase_production' };
-    }
-    throw new Error(`Database error updating music track: ${error?.message || 'Unknown database error'}`);
+    const existing = (await readRowById('music_tracks', id)) as MusicTrackRecord | null;
+    if (!existing) throw new Error(`Track '${id}' was not found; nothing was updated.`);
+
+    const merged = { ...existing, ...normalized, id, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase
+      .from('music_tracks')
+      .update(compactRecord(merged))
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw databaseError('updating a music track', 'music_tracks', error);
+
+    await syncLocalStoreIfDev((store) => {
+      const idx = store.music_tracks.findIndex((entry) => entry.id === id);
+      if (idx >= 0) store.music_tracks[idx] = data as MusicTrackRecord;
+    });
+    return { track: data as MusicTrackRecord, destination: 'supabase_production' };
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
-
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  const existing = local.music_tracks.find((t) => t.id === id);
-  if (!existing) {
-    throw new Error(`Track ${id} not found`);
-  }
+  const existingIdx = local.music_tracks.findIndex((entry) => entry.id === id);
+  if (existingIdx < 0) throw new Error(`Track '${id}' was not found; nothing was updated.`);
+
   const updatedTrack: MusicTrackRecord = {
-    ...existing,
-    ...updates,
+    ...local.music_tracks[existingIdx],
+    ...normalized,
     id,
     updated_at: new Date().toISOString(),
   };
-  const idx = local.music_tracks.findIndex((t) => t.id === id);
-  local.music_tracks[idx] = updatedTrack;
+  local.music_tracks[existingIdx] = updatedTrack;
   await saveLocalStore(local);
   return { track: updatedTrack, destination: 'local_persistent' };
 }
 
 export async function deleteMusicTrack(id: string): Promise<{ success: boolean; error?: string }> {
+  assertSafeRecordId(id, 'Track');
   const supabase = await createServiceClient();
   if (supabase) {
-    const { error } = await supabase.from('music_tracks').delete().eq('id', id);
-    if (error) {
-      throw new Error(`Database error deleting music track: ${error.message}`);
+    const { data, error } = await supabase
+      .from('music_tracks')
+      .delete()
+      .eq('id', id)
+      .select('id');
+    if (error) throw databaseError('deleting a music track', 'music_tracks', error);
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error(`Track '${id}' was not found; nothing was deleted.`);
     }
+
     await syncLocalStoreIfDev((store) => {
-      store.music_tracks = store.music_tracks.filter((t) => t.id !== id);
+      store.music_tracks = store.music_tracks.filter((entry) => entry.id !== id);
     });
     return { success: true };
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
-
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  local.music_tracks = local.music_tracks.filter((t) => t.id !== id);
+  const before = local.music_tracks.length;
+  local.music_tracks = local.music_tracks.filter((entry) => entry.id !== id);
+  if (local.music_tracks.length === before) {
+    throw new Error(`Track '${id}' was not found; nothing was deleted.`);
+  }
   await saveLocalStore(local);
   return { success: true };
 }
@@ -954,28 +1461,22 @@ export async function deleteMusicTrack(id: string): Promise<{ success: boolean; 
 // ====================================================================
 
 export async function getMediaAssets(): Promise<{ assets: MediaAssetRecord[]; source: 'supabase' | 'local_persistent' }> {
-  try {
-    const supabase = await createServerClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('media_library').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        return {
-          assets: data.map((d) => ({
-            id: d.id,
-            name: d.name,
-            url: d.public_url || d.url || d.storage_path,
-            type: d.file_type || d.type || 'image',
-            size: d.size || 'Static',
-            created_at: d.created_at,
-          })),
-          source: 'supabase',
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('Supabase getMediaAssets error:', err);
+  const rows = await listRows('media_library');
+  if (rows) {
+    return {
+      assets: rows.map((row: any) => ({
+        id: row.id,
+        name: row.name || row.storage_path || 'asset',
+        url: row.public_url || row.url || row.storage_path || '',
+        type: row.file_type || row.type || 'image',
+        size: row.size || 'Static',
+        created_at: row.created_at,
+      })),
+      source: 'supabase',
+    };
   }
 
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
   return { assets: local.media_assets, source: 'local_persistent' };
 }
@@ -985,73 +1486,88 @@ export async function saveMediaAsset(asset: Partial<MediaAssetRecord>): Promise<
   destination: 'supabase_production' | 'local_persistent';
   warning?: string;
 }> {
-  const id = asset.id || `media-${Date.now()}`;
+  const id = assertSafeRecordId(String(asset.id || `media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`), 'Media asset');
   const now = new Date().toISOString();
+  const url = String(asset.url || '').trim();
+  assertNoEphemeralUrl(url, 'url');
 
   const record: MediaAssetRecord = {
     id,
-    name: (asset.name || 'asset.png').trim(),
-    url: (asset.url || '').trim(),
-    type: asset.type || 'image',
-    size: asset.size || 'Unknown',
+    name: String(asset.name || 'asset.png').trim() || 'asset.png',
+    url,
+    type: String(asset.type || 'image'),
+    size: String(asset.size || 'Unknown'),
     created_at: asset.created_at || now.split('T')[0],
   };
 
   const supabase = await createServiceClient();
   if (supabase) {
+    let existing: any = null;
+    const { data: current, error: readError } = await supabase
+      .from('media_library')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (readError) throw databaseError('reading a media asset', 'media_library', readError);
+    existing = current;
+
     const payload = {
       id: record.id,
       name: record.name,
       file_type: record.type,
-      size_bytes: 1024,
-      storage_path: record.url,
+      size_bytes: Number(existing?.size_bytes) || 1024,
+      storage_path: existing?.storage_path || record.url,
       public_url: record.url,
-      category: 'general',
-      created_at: now,
+      category: existing?.category || 'general',
+      created_at: existing?.created_at || now,
     };
     const { data, error } = await supabase.from('media_library').upsert(payload).select().single();
-    if (!error && data) {
-      await syncLocalStoreIfDev((store) => {
-        const idx = store.media_assets.findIndex((a) => a.id === id);
-        if (idx >= 0) store.media_assets[idx] = record;
-        else store.media_assets.unshift(record);
-      });
-      return { asset: record, destination: 'supabase_production' };
-    }
-    throw new Error(`Database error saving media asset: ${error?.message || 'Unknown database error'}`);
+    if (error || !data) throw databaseError('saving a media asset', 'media_library', error);
+
+    await syncLocalStoreIfDev((store) => {
+      const idx = store.media_assets.findIndex((entry) => entry.id === id);
+      if (idx >= 0) store.media_assets[idx] = record;
+      else store.media_assets.unshift(record);
+    });
+    return { asset: record, destination: 'supabase_production' };
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
-
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  const existingIdx = local.media_assets.findIndex((a) => a.id === id);
-  if (existingIdx >= 0) local.media_assets[existingIdx] = record;
+  const existingIdx = local.media_assets.findIndex((entry) => entry.id === id);
+  if (existingIdx >= 0) local.media_assets[existingIdx] = { ...local.media_assets[existingIdx], ...record };
   else local.media_assets.unshift(record);
   await saveLocalStore(local);
   return { asset: record, destination: 'local_persistent' };
 }
 
 export async function deleteMediaAsset(id: string): Promise<{ success: boolean }> {
+  assertSafeRecordId(id, 'Media asset');
   const supabase = await createServiceClient();
   if (supabase) {
-    const { error } = await supabase.from('media_library').delete().eq('id', id);
-    if (error) {
-      throw new Error(`Database error deleting media asset: ${error.message}`);
+    const { data, error } = await supabase
+      .from('media_library')
+      .delete()
+      .eq('id', id)
+      .select('id');
+    if (error) throw databaseError('deleting a media asset', 'media_library', error);
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error(`Media asset '${id}' was not found; nothing was deleted.`);
     }
+
     await syncLocalStoreIfDev((store) => {
-      store.media_assets = store.media_assets.filter((a) => a.id !== id);
+      store.media_assets = store.media_assets.filter((entry) => entry.id !== id);
     });
     return { success: true };
   }
 
-  if (isServerlessReadOnlyEnvironment()) {
-    throw new Error('Database connection is not configured in this production environment.');
-  }
-
+  assertNoConfiguredBackendInProduction();
   const local = await getLocalStore();
-  local.media_assets = local.media_assets.filter((a) => a.id !== id);
+  const before = local.media_assets.length;
+  local.media_assets = local.media_assets.filter((entry) => entry.id !== id);
+  if (local.media_assets.length === before) {
+    throw new Error(`Media asset '${id}' was not found; nothing was deleted.`);
+  }
   await saveLocalStore(local);
   return { success: true };
 }

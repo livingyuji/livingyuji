@@ -76,6 +76,73 @@ export interface MinecraftProduct {
   updatedAt: string;
 }
 
+function getAdminRequestHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers['Content-Type'] = 'application/json';
+  if (typeof window !== 'undefined') {
+    const token = sessionStorage.getItem('lyos_admin_token');
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+      headers['x-admin-token'] = token;
+    }
+  }
+  return headers;
+}
+
+function makeProductId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `prod-custom-${crypto.randomUUID()}`;
+  }
+  return `prod-custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function mapProductRecord(record: any): MinecraftProduct {
+  const category = (record.category || 'plugins') as MinecraftCategory;
+  const categoryDefinition = CATEGORY_DEFINITIONS.find((entry) => entry.id === category);
+  const price = Number(record.price) || 0;
+  return {
+    id: String(record.id),
+    name: record.name || 'Untitled Resource',
+    category,
+    categoryName: record.category_name || record.categoryName || categoryDefinition?.label || 'Plugins',
+    shortDesc: record.short_desc || record.shortDesc || '',
+    fullDesc: record.full_desc || record.fullDesc || '',
+    price,
+    isFree: record.is_free !== undefined ? record.is_free !== false : record.isFree !== false,
+    version: record.version || 'v1.0.0',
+    mcVersions: Array.isArray(record.mc_versions)
+      ? record.mc_versions
+      : Array.isArray(record.mcVersions)
+      ? record.mcVersions
+      : ['1.21.4'],
+    serverSoftware: Array.isArray(record.server_software)
+      ? record.server_software
+      : Array.isArray(record.serverSoftware)
+      ? record.serverSoftware
+      : ['Paper'],
+    dependencies: Array.isArray(record.dependencies) ? record.dependencies : [],
+    features: Array.isArray(record.features) ? record.features : [],
+    installationSteps: Array.isArray(record.installation_steps)
+      ? record.installation_steps
+      : Array.isArray(record.installationSteps)
+      ? record.installationSteps
+      : [],
+    changelog: record.changelog || '',
+    fileFormat: record.file_format || record.fileFormat || '.jar',
+    fileSize: record.file_size || record.fileSize || '1 MB',
+    creator: record.creator || 'LivingYuji',
+    published: record.published !== false,
+    featured: record.featured === true,
+    rating: Number(record.rating) || 0,
+    downloadsCount: Number(record.downloads_count ?? record.downloadsCount) || 0,
+    iconBg: record.icon_bg || record.iconBg || 'from-blue-600 to-indigo-900',
+    iconSymbol: record.icon_symbol || record.iconSymbol || '⚡',
+    downloadUrl: record.download_url || record.downloadUrl,
+    createdAt: record.created_at || record.createdAt || record.updated_at || record.updatedAt,
+    updatedAt: record.updated_at || record.updatedAt || '2026-10-25',
+  };
+}
+
 const CATEGORY_DEFINITIONS: { id: MinecraftCategory; label: string; icon: string }[] = [
   { id: 'setups', label: 'Minecraft Setups', icon: '🏰' },
   { id: 'plugins', label: 'Plugins', icon: '🔌' },
@@ -363,6 +430,7 @@ export function MinecraftStoreApp() {
 
   // Server-verified Admin authorization state
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
   const [downloadModalInfo, setDownloadModalInfo] = useState<{
     isOpen: boolean;
     title: string;
@@ -372,7 +440,10 @@ export function MinecraftStoreApp() {
 
   useEffect(() => {
     let isMounted = true;
-    fetch('/api/admin/session')
+    fetch('/api/admin/session', {
+      headers: getAdminRequestHeaders(),
+      credentials: 'include',
+    })
       .then((r) => r.json())
       .then((data) => {
         if (isMounted) setIsAdminUnlocked(Boolean(data.authenticated));
@@ -381,36 +452,41 @@ export function MinecraftStoreApp() {
         if (isMounted) setIsAdminUnlocked(false);
       });
 
-    // Hydrate products from Supabase cloud catalog
-    fetch('/api/admin/products')
-      .then((r) => r.json())
-      .then((data) => {
-        if (isMounted && data && data.success && Array.isArray(data.products) && data.products.length > 0) {
-          const mapped: MinecraftProduct[] = data.products.map((p: any) => ({
-            ...p,
-            categoryName: p.category_name || p.categoryName || p.category,
-            shortDesc: p.short_desc || p.shortDesc || '',
-            fullDesc: p.full_desc || p.fullDesc || '',
-            isFree: p.is_free !== undefined ? p.is_free : p.isFree,
-            mcVersions: p.mc_versions || p.mcVersions || ['1.21.4'],
-            serverSoftware: p.server_software || p.serverSoftware || ['Paper'],
-            installationSteps: p.installation_steps || p.installationSteps || [],
-            fileFormat: p.file_format || p.fileFormat || '.jar',
-            fileSize: p.file_size || p.fileSize || '1 MB',
-            downloadsCount: p.downloads_count || p.downloadsCount || 0,
-            iconBg: p.icon_bg || p.iconBg || 'from-blue-600 to-indigo-900',
-            iconSymbol: p.icon_symbol || p.iconSymbol || '⚡',
-            downloadUrl: p.download_url || p.downloadUrl,
-            createdAt: p.created_at || p.createdAt || p.updated_at || p.updatedAt || '2026-10-25',
-            updatedAt: p.updated_at || p.updatedAt || '2026-10-25',
-          }));
+    // Hydrate products from the authoritative server catalog. A successful
+    // empty response clears stale browser data instead of preserving a ghost
+    // catalog. Cached data is retained only when the backend is unreachable.
+    fetch('/api/admin/products', {
+      headers: getAdminRequestHeaders(),
+      credentials: 'include',
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success || !Array.isArray(data.products)) {
+          throw new Error(data.error || `Catalog request failed (${response.status}).`);
+        }
+
+        if (isMounted) {
+          const mapped = data.products.map(mapProductRecord);
           setProducts(mapped);
+          setCatalogNotice(
+            data.source === 'local_persistent'
+              ? mapped.length === 0
+                ? 'The local development store catalog is empty. No shared production products are available in this environment.'
+                : 'Showing the development-only local catalog. It is not shared production persistence.'
+              : null
+          );
           if (typeof window !== 'undefined') {
             localStorage.setItem('livingyuji_mc_products', JSON.stringify(mapped));
           }
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (isMounted) {
+          setCatalogNotice(
+            `Live catalog unavailable (${error instanceof Error ? error.message : 'network error'}). Showing a cached/offline copy; admin changes may not persist.`
+          );
+        }
+      });
 
     return () => {
       isMounted = false;
@@ -545,7 +621,7 @@ export function MinecraftStoreApp() {
       CATEGORY_DEFINITIONS[0];
 
     const newProduct: MinecraftProduct = {
-      id: `prod-custom-${Date.now()}`,
+      id: makeProductId(),
       name: adminProductForm.name,
       category: adminProductForm.category,
       categoryName: catDef.label,
@@ -575,27 +651,44 @@ export function MinecraftStoreApp() {
     try {
       const res = await fetch('/api/admin/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminRequestHeaders(true),
+        credentials: 'include',
         body: JSON.stringify({
-          ...newProduct,
+          id: newProduct.id,
+          name: newProduct.name,
+          category: newProduct.category,
           category_name: newProduct.categoryName,
           short_desc: newProduct.shortDesc,
           full_desc: newProduct.fullDesc,
+          price: newProduct.price,
           is_free: newProduct.isFree,
+          version: newProduct.version,
           mc_versions: newProduct.mcVersions,
           server_software: newProduct.serverSoftware,
+          dependencies: newProduct.dependencies,
+          features: newProduct.features,
           installation_steps: newProduct.installationSteps,
+          changelog: newProduct.changelog,
           file_format: newProduct.fileFormat,
           file_size: newProduct.fileSize,
+          creator: newProduct.creator,
+          published: newProduct.published,
+          featured: newProduct.featured,
           downloads_count: newProduct.downloadsCount,
           icon_bg: newProduct.iconBg,
           icon_symbol: newProduct.iconSymbol,
+          download_url: newProduct.downloadUrl || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        setProducts((prev) => [newProduct, ...prev]);
-        alert(`Product "${newProduct.name}" created and saved to persistent catalog!`);
+      if (res.ok && data.success && data.product) {
+        const persisted = mapProductRecord(data.product);
+        setProducts((prev) => [persisted, ...prev.filter((product) => product.id !== persisted.id)]);
+        setCatalogNotice(null);
+        alert(
+          data.warning ||
+            `Product "${persisted.name}" was created and verified in persistent storage.`
+        );
         setActiveTab('store');
       } else {
         alert(data.error || 'Failed to save product to server.');
@@ -608,7 +701,11 @@ export function MinecraftStoreApp() {
   const deleteProduct = async (id: string) => {
     if (confirm('Are you sure you want to delete this product?')) {
       try {
-        const res = await fetch(`/api/admin/products?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const res = await fetch(`/api/admin/products?id=${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: getAdminRequestHeaders(),
+          credentials: 'include',
+        });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success) {
           setProducts((prev) => prev.filter((p) => p.id !== id));
@@ -706,6 +803,12 @@ export function MinecraftStoreApp() {
 
       {/* 2. MAIN STORE BODY */}
       <div className="flex-1 overflow-hidden flex flex-col">
+        {catalogNotice && (
+          <div className="mx-6 mt-4 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] flex items-center gap-2 shrink-0">
+            <AlertCircle size={14} className="shrink-0" />
+            <span>{catalogNotice}</span>
+          </div>
+        )}
         {/* ======================================================== */}
         {/* TAB 1: MARKETPLACE */}
         {/* ======================================================== */}

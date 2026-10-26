@@ -14,7 +14,10 @@ export async function GET() {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const status = /Apply the prepared migration|not configured in this production environment/i.test(message)
+      ? 503
+      : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }
 
@@ -41,6 +44,13 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to update branding settings.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const status = /browser-only URL|must be an absolute http\(s\) URL|root-relative media path|unapproved iframe provider|must be a URL string/i.test(
+      message
+    )
+      ? 400
+      : /Apply the prepared migration|not configured in this production environment/i.test(message)
+      ? 503
+      : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }

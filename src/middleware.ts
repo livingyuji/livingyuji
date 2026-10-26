@@ -17,9 +17,15 @@ async function verifyTokenEdge(token: string | undefined): Promise<boolean> {
     if (payload.role !== 'admin') return false;
     if (Date.now() > payload.exp) return false;
 
-    // Verify signature using Web Crypto HMAC SHA-256
+    // Verify signature using Web Crypto HMAC SHA-256. Production must never
+    // fall back to a development default: a missing secret fails closed.
+    const configuredSecret = process.env.ADMIN_SESSION_SECRET;
+    if (!configuredSecret && process.env.NODE_ENV === 'production') {
+      return false;
+    }
+
     const secret =
-      process.env.ADMIN_SESSION_SECRET ||
+      configuredSecret ||
       process.env.ADMIN_ACCESS_PASSPHRASE ||
       'lyos-dev-session-secret-change-in-production';
 

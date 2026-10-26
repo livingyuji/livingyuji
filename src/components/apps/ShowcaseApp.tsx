@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useShowcaseStore, ShowcaseProject, ProjectStatus } from '@/store/showcaseStore';
 import { useWindowStore } from '@/store/windowStore';
 import { DiscordPurchaseModal } from '@/components/common/DiscordPurchaseModal';
+import { isPublicShowcaseProject } from '@/lib/showcase/visibility';
 import {
   Search,
   LayoutGrid,
@@ -53,28 +54,44 @@ export function ShowcaseApp() {
   } = useShowcaseStore();
 
   const { openWindow } = useWindowStore();
+  const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
 
-  // Cloud Projects Hydration from Supabase
+  // Cloud Projects Hydration from Supabase. Successful empty responses are
+  // authoritative; the built-in catalog remains only when the API fails.
   useEffect(() => {
-    fetch('/api/admin/showcase')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data && data.success && Array.isArray(data.projects) && data.projects.length > 0) {
-          const mapped = data.projects.map((p: any) => ({
+    let isMounted = true;
+    fetch('/api/admin/showcase?scope=public', { credentials: 'omit' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success || !Array.isArray(data.projects)) {
+          throw new Error(data.error || `Showcase request failed (${response.status}).`);
+        }
+        if (!isMounted) return;
+        const mapped = data.projects
+          .filter((p: any) => isPublicShowcaseProject(p))
+          .map((p: any) => ({
             ...p,
             title: p.title || p.name || 'Untitled Project',
             summary: p.summary || p.short_description || (p.description ? p.description.slice(0, 100) : '') || '',
             description: p.description || '',
-            status: p.status || 'Active',
+            status: p.status || 'Released',
             category: p.category_id || p.category || 'web-apps',
-            categoryName: p.category_name || (p.category_id === 'mc-plugins' ? 'Minecraft Plugins' : 'Websites & Web Apps'),
+            categoryName:
+              p.category_name ||
+              (p.category_id === 'mc-plugins'
+                ? 'Minecraft Plugins'
+                : p.category_id === 'discord-bots'
+                ? 'Discord Bots'
+                : p.category_id === 'server-setups'
+                ? 'Server Setups'
+                : 'Websites & Web Apps'),
             gradientBg: p.gradient_bg || p.gradientBg || 'from-blue-600 to-indigo-900',
             iconSymbol: p.icon_symbol || p.iconSymbol || '⚡',
             featured: Boolean(p.featured),
-            isFree: p.is_free !== undefined ? p.is_free : true,
+            isFree: p.is_free !== undefined ? p.is_free !== false : true,
             price: Number(p.price) || 0,
             version: p.version || 'v1.0.0',
-            features: Array.isArray(p.features) ? p.features : ['Core Feature'],
+            features: Array.isArray(p.features) ? p.features : [],
             technologies: Array.isArray(p.technologies) ? p.technologies : [],
             screenshots: Array.isArray(p.screenshots) ? p.screenshots : [],
             links: p.links || {
@@ -82,13 +99,31 @@ export function ShowcaseApp() {
               liveUrl: p.live_url || '',
               downloadUrl: p.download_url || '',
             },
-            createdAt: p.createdAt || p.created_at || new Date().toISOString(),
-            updatedAt: p.updatedAt || p.updated_at || p.createdAt || p.created_at || new Date().toISOString(),
+            changelog: p.changelog || '',
+            compatibility: p.compatibility || {},
+            createdAt: p.created_at || p.createdAt || new Date().toISOString(),
+            updatedAt: p.updated_at || p.updatedAt || p.created_at || p.createdAt || new Date().toISOString(),
           }));
-          useShowcaseStore.setState({ projects: mapped });
-        }
+        useShowcaseStore.setState({ projects: mapped });
+        setCatalogNotice(
+          data.source === 'local_persistent'
+            ? mapped.length === 0
+              ? 'The local development showcase catalog is empty. The successful response is authoritative, so no built-in fallback projects are displayed.'
+              : 'Showing the development-only local showcase catalog. It is not shared production persistence.'
+            : null
+        );
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (isMounted) {
+          setCatalogNotice(
+            `Live showcase unavailable (${error instanceof Error ? error.message : 'network error'}). Showing the built-in fallback catalog.`
+          );
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Discord Purchase Modal State
@@ -108,7 +143,7 @@ export function ShowcaseApp() {
   // Filtered & Sorted Projects
   const filteredProjects = useMemo(() => {
     return projects
-      .filter((p) => p.status !== 'Private') // Hide private projects from public visitors
+      .filter((p) => isPublicShowcaseProject(p)) // Hide private/unpublished projects from public visitors
       .filter((p) => {
         if (activeCategoryId === 'all') return true;
         return p.category === activeCategoryId;
@@ -163,7 +198,7 @@ export function ShowcaseApp() {
 
   // Featured Spotlight Projects
   const featuredProjects = useMemo(() => {
-    return projects.filter((p) => p.featured && p.status !== 'Private').slice(0, 3);
+    return projects.filter((p) => p.featured && isPublicShowcaseProject(p)).slice(0, 3);
   }, [projects]);
 
   // Handle Free Download
@@ -330,6 +365,13 @@ Official Site: https://livingyuji.com
         </div>
       </div>
 
+      {catalogNotice && (
+        <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] flex items-center gap-2 shrink-0">
+          <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+          <span>{catalogNotice}</span>
+        </div>
+      )}
+
       {/* 2. MAIN WORKSPACE WITH SIDEBAR */}
       <div className="flex-1 flex overflow-hidden">
         {/* SIDEBAR CATEGORY NAVIGATION */}
@@ -345,8 +387,8 @@ Official Site: https://livingyuji.com
                 const isActive = activeCategoryId === cat.id;
                 const count =
                   cat.id === 'all'
-                    ? projects.filter((p) => p.status !== 'Private').length
-                    : projects.filter((p) => p.category === cat.id && p.status !== 'Private').length;
+                    ? projects.filter((p) => isPublicShowcaseProject(p)).length
+                    : projects.filter((p) => p.category === cat.id && isPublicShowcaseProject(p)).length;
 
                 return (
                   <button
@@ -673,8 +715,21 @@ Official Site: https://livingyuji.com
               )}
 
               {/* C. ACTIVE VIEW MODES */}
-
-              {/* 1. GRID VIEW */}
+              {filteredProjects.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center rounded-2xl bg-[#141824] border border-white/10">
+                  <Filter size={28} className="text-slate-500 mb-3" />
+                  <h3 className="text-sm font-bold text-white">
+                    {projects.length === 0 ? 'No public projects available' : 'No projects match these filters'}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1.5 max-w-md leading-relaxed">
+                    {projects.length === 0
+                      ? 'The public catalog returned no published projects. Built-in fallback projects are not displayed after a successful empty response.'
+                      : 'Try a different category, status, price filter, or search term.'}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* 1. GRID VIEW */}
               {viewMode === 'grid' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs text-slate-400">
@@ -924,6 +979,8 @@ Official Site: https://livingyuji.com
                     ))}
                   </div>
                 </div>
+              )}
+                </>
               )}
             </>
           )}

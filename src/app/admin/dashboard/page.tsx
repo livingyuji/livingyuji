@@ -1,6 +1,12 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { verifySessionToken, ADMIN_COOKIE_NAME, SUPABASE_COOKIE_NAME } from '@/lib/auth/adminAuth';
+import {
+  verifySessionToken,
+  isAdminAuthConfigured,
+  isAuthorizedAdminUser,
+  ADMIN_COOKIE_NAME,
+  SUPABASE_COOKIE_NAME,
+} from '@/lib/auth/adminAuth';
 import { AdminDashboardClient } from './AdminDashboardClient';
 
 export const dynamic = 'force-dynamic';
@@ -12,8 +18,9 @@ export default async function AdminDashboardPage() {
 
   let isAuthorized = verifySessionToken(sessionToken);
 
-  // If session token not valid, check Supabase token
-  if (!isAuthorized && supabaseToken) {
+  // If session token not valid, check Supabase token. Gated on the admin auth
+  // configuration so a production deployment missing its secrets fails closed.
+  if (!isAuthorized && supabaseToken && isAdminAuthConfigured()) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (supabaseUrl && supabaseAnonKey) {
@@ -21,12 +28,8 @@ export default async function AdminDashboardPage() {
         const { createClient } = await import('@supabase/supabase-js');
         const supabase = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
         const { data, error } = await supabase.auth.getUser(supabaseToken);
-        if (!error && data.user) {
-          const userRole = data.user.app_metadata?.role || data.user.user_metadata?.role;
-          const adminEmail = process.env.ADMIN_EMAIL;
-          if (userRole === 'admin' || (adminEmail && data.user.email === adminEmail)) {
-            isAuthorized = true;
-          }
+        if (!error && data.user && isAuthorizedAdminUser(data.user)) {
+          isAuthorized = true;
         }
       } catch {
         isAuthorized = false;

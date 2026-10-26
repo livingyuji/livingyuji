@@ -62,7 +62,7 @@ export type Wallpaper =
   | 'dark';
 
 export type WallpaperType = 'preset' | 'image' | 'video';
-export type VideoWallpaperSource = 'local' | 'url' | null;
+export type VideoWallpaperSource = 'local' | 'url' | 'iframe' | null;
 
 export interface OSSettings {
   wallpaper: Wallpaper;
@@ -86,6 +86,11 @@ export interface OSSettings {
   videoWallpaperMuted?: boolean;
   wallpaperMode?: 'cover' | 'contain' | 'tile';
   wallpaperOpacity?: number;
+  /**
+   * True once this visitor explicitly chooses a wallpaper. Cloud branding
+   * hydration must not replace that personal preference.
+   */
+  wallpaperUserOverride?: boolean;
 }
 
 interface WindowStore {
@@ -164,6 +169,13 @@ export const APP_CONFIGS: Record<AppId, { title: string; defaultWidth: number; d
   appstore: { title: 'LivingYuji App Store', defaultWidth: 980, defaultHeight: 660, minWidth: 600, minHeight: 420, icon: '🏪' },
 };
 
+/**
+ * Optional Streamable coding-video wallpaper. It is retained in state as a
+ * fallback, but only renders when no image or preset wallpaper is available.
+ */
+export const STREAMABLE_FALLBACK_VIDEO_URL =
+  'https://streamable.com/e/c51sit?autoplay=1&loop=1&muted=1&controls=0';
+
 const DEFAULT_SETTINGS: OSSettings = {
   wallpaper: 'matrix',
   wallpaperType: 'preset',
@@ -182,10 +194,11 @@ const DEFAULT_SETTINGS: OSSettings = {
   customLogoUrl: '/avatar.png',
   customFaviconUrl: '/favicon.png',
   customWallpaperUrl: null,
-  customVideoWallpaperUrl: null,
+  customVideoWallpaperUrl: STREAMABLE_FALLBACK_VIDEO_URL,
   videoWallpaperMuted: true,
   wallpaperMode: 'cover',
   wallpaperOpacity: 85,
+  wallpaperUserOverride: false,
 };
 
 const getInitialPos = (index: number, width: number, height: number) => {
@@ -197,6 +210,37 @@ const getInitialPos = (index: number, width: number, height: number) => {
   const y = Math.max(20, Math.min((vh - taskbarH - height) / 2 + cascade - 20, vh - taskbarH - height - 20));
   return { x, y };
 };
+
+/**
+ * Pure persist migration for the window store. Exported so the legacy-preset
+ * behavior can be regression-tested without re-importing the whole store.
+ */
+export function migrateWindowStoreState(
+  persistedState: unknown,
+  version: number
+): { settings?: Partial<OSSettings> } {
+  const state = persistedState as { settings?: Partial<OSSettings> };
+  // v0 stores predate explicit wallpaper tracking. Their preset/image
+  // wallpaper is the default, so it is preserved and classified below.
+  if (state.settings && version < 2) {
+    const settings = state.settings;
+    const explicitlyPersonal =
+      settings.wallpaperUserOverride === true ||
+      settings.videoWallpaperSource === 'local' ||
+      Boolean(settings.customVideoWallpaperUrl?.startsWith('local:')) ||
+      Boolean(settings.customWallpaperUrl?.startsWith('local:')) ||
+      (Boolean(settings.customWallpaperUrl) && settings.wallpaperType === 'image') ||
+      (Boolean(settings.wallpaper) && settings.wallpaper !== DEFAULT_SETTINGS.wallpaper) ||
+      Boolean(
+        settings.customVideoWallpaperUrl &&
+          settings.customVideoWallpaperUrl !== DEFAULT_SETTINGS.customVideoWallpaperUrl
+      );
+
+    settings.wallpaperUserOverride = explicitlyPersonal;
+  }
+
+  return state;
+}
 
 export const useWindowStore = create<WindowStore>()(
   persist(
@@ -396,6 +440,7 @@ export const useWindowStore = create<WindowStore>()(
     }),
     {
       name: 'lyos-window-store',
+      version: 2, // v2 tracks explicit visitor wallpaper preferences
       partialize: (state) => {
         const settings = { ...state.settings };
         // Never serialize temporary in-memory blob: URLs to localStorage
@@ -410,6 +455,8 @@ export const useWindowStore = create<WindowStore>()(
           settings,
         };
       },
+      migrate: (persistedState: unknown, version: number) =>
+        migrateWindowStoreState(persistedState, version),
     }
   )
 );

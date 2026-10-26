@@ -5,10 +5,13 @@ import { useWindowStore } from '@/store/windowStore';
 import { useDesktopIconStore, GRID_CONFIG } from '@/store/desktopIconStore';
 import { useFileSystemStore } from '@/store/fileSystemStore';
 import { useDiscordSettingsStore } from '@/store/discordSettingsStore';
-import { useShowcaseStore, ShowcaseProject, ProjectStatus } from '@/store/showcaseStore';
+import { useShowcaseStore, ShowcaseProject, ProjectStatus, INITIAL_PROJECTS } from '@/store/showcaseStore';
 import { checkSupabaseConnection } from '@/lib/supabase/client';
-import { saveVideoWallpaperBlob, clearVideoWallpaperBlob, resolveWallpaperMediaUrl } from '@/lib/storage/wallpaperStorage';
-import { saveMusicAudioBlob, saveMusicCoverBlob, deleteMusicBlobs, resolveMusicMediaUrl } from '@/lib/storage/musicStorage';
+import { clearVideoWallpaperBlob, resolveWallpaperMediaUrl } from '@/lib/storage/wallpaperStorage';
+import { deleteMusicBlobs, resolveMusicMediaUrl } from '@/lib/storage/musicStorage';
+import { uploadAdminFile } from '@/lib/storage/uploadClient';
+import { detectIframeVideoSource } from '@/lib/validation/urls';
+import { useAuthenticatedCatalogRefresh } from '@/lib/admin/useAuthenticatedCatalogRefresh';
 import {
   Shield,
   Layout,
@@ -76,6 +79,75 @@ interface AdminPanelAppProps {
   isStandalonePage?: boolean;
 }
 
+function makeEntityId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function mapShowcaseRecord(record: any): ShowcaseProject {
+  const category = record.category_id || record.category || 'web-apps';
+  return {
+    id: record.id,
+    title: record.title || record.name || 'Untitled Project',
+    slug: record.slug || '',
+    category,
+    categoryName:
+      record.category_name ||
+      (category === 'mc-plugins'
+        ? 'Minecraft Plugins'
+        : category === 'discord-bots'
+        ? 'Discord Bots'
+        : category === 'server-setups'
+        ? 'Server Setups'
+        : 'Websites & Web Apps'),
+    summary: record.summary || record.short_description || '',
+    description: record.description || '',
+    coverImage: record.cover_image || record.coverImage,
+    gradientBg: record.gradient_bg || record.gradientBg || 'from-blue-600 to-indigo-900',
+    iconSymbol: record.icon_symbol || record.iconSymbol || '⚡',
+    screenshots: Array.isArray(record.screenshots) ? record.screenshots : [],
+    features: Array.isArray(record.features) ? record.features : [],
+    technologies: Array.isArray(record.technologies) ? record.technologies : [],
+    status: (record.status || 'Released') as ProjectStatus,
+    featured: record.featured === true,
+    isFree: record.is_free !== undefined ? record.is_free !== false : record.isFree !== false,
+    price: Number(record.price) || 0,
+    version: record.version || 'v1.0.0',
+    changelog: record.changelog || '',
+    compatibility: record.compatibility || {},
+    links: record.links || {},
+    createdAt: record.created_at || record.createdAt || new Date().toISOString().split('T')[0],
+    updatedAt: record.updated_at || record.updatedAt || new Date().toISOString().split('T')[0],
+  };
+}
+
+function toShowcasePayload(project: ShowcaseProject): Record<string, any> {
+  return {
+    id: project.id,
+    title: project.title,
+    slug: project.slug,
+    category_id: project.category,
+    summary: project.summary,
+    description: project.description,
+    features: project.features,
+    technologies: project.technologies,
+    status: project.status,
+    featured: project.featured,
+    is_free: project.isFree,
+    price: project.price,
+    version: project.version,
+    gradient_bg: project.gradientBg,
+    icon_symbol: project.iconSymbol,
+    screenshots: project.screenshots,
+    links: project.links,
+    compatibility: project.compatibility,
+    changelog: project.changelog || '',
+    created_at: project.createdAt,
+  };
+}
+
 export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) {
   const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
   const [passphraseInput, setPassphraseInput] = useState('');
@@ -119,6 +191,28 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     },
     [isStandalonePage]
   );
+
+  const fetchAdminShowcase = React.useCallback(async () => {
+    try {
+      const res = await adminFetch('/api/admin/showcase');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !Array.isArray(data.projects)) {
+        showToast(data.error || 'Failed to load the administrator showcase catalog.');
+        return;
+      }
+      // The authenticated route returns drafts/private projects. Preserve the
+      // authoritative empty result rather than falling back to seeded data.
+      useShowcaseStore.setState({ projects: data.projects.map(mapShowcaseRecord) });
+    } catch {
+      showToast('Unable to reach the showcase catalog. Existing entries were preserved.');
+    }
+  }, [adminFetch]);
+
+  useEffect(() => {
+    if (authState === 'authenticated') {
+      fetchAdminShowcase();
+    }
+  }, [authState, fetchAdminShowcase]);
 
   const runDiagnostics = React.useCallback(async () => {
     setIsRunningDiagnostics(true);
@@ -258,12 +352,14 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     setIsSavingProject(true);
     try {
       const isEditing = Boolean(editingProject);
+      const projectId = editingProject?.id || makeEntityId('proj');
+      const title = projectForm.title.trim();
       const newProj: ShowcaseProject = {
-        id: editingProject ? editingProject.id : `proj-${Date.now()}`,
-        title: projectForm.title.trim(),
+        id: projectId,
+        title,
         slug:
           projectForm.slug ||
-          projectForm.title
+          title
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/(^-|-$)+/g, ''),
@@ -278,8 +374,8 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         technologies: projectForm.technologies || ['Java'],
         status: (projectForm.status as ProjectStatus) || 'Released',
         featured: Boolean(projectForm.featured),
-        isFree: Boolean(projectForm.isFree),
-        price: projectForm.price || 0,
+        isFree: projectForm.isFree !== false,
+        price: Number(projectForm.price) || 0,
         version: projectForm.version || 'v1.0.0',
         links: projectForm.links || {},
         createdAt: editingProject?.createdAt || new Date().toISOString().split('T')[0],
@@ -289,10 +385,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       const res = await adminFetch('/api/admin/showcase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newProj,
-          category_id: newProj.category || 'web-apps',
-        }),
+        body: JSON.stringify(toShowcasePayload(newProj)),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -301,19 +394,102 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         return;
       }
 
+      const persisted = mapShowcaseRecord(data.project);
       if (isEditing) {
-        showcaseStore.updateProject(editingProject!.id, newProj);
-        showToast(`Saved changes to "${newProj.title}"!`);
+        showcaseStore.updateProject(editingProject!.id, persisted);
       } else {
-        showcaseStore.addProject(newProj);
-        showToast(`Created project "${newProj.title}"!`);
+        showcaseStore.addProject(persisted);
       }
+      showToast(
+        data.warning
+          ? data.warning
+          : isEditing
+          ? `Saved changes to "${persisted.title}"!`
+          : `Created project "${persisted.title}"!`
+      );
       setIsCreatingProject(false);
       setEditingProject(null);
     } catch {
       showToast('Error saving project to server.');
     } finally {
       setIsSavingProject(false);
+    }
+  };
+
+  const handleDuplicateProject = async (project: ShowcaseProject) => {
+    try {
+      const copy: ShowcaseProject = {
+        ...project,
+        id: makeEntityId('proj'),
+        title: `${project.title} (Copy)`,
+        slug: `${project.slug || project.id}-copy-${Date.now()}`,
+        featured: false,
+        createdAt: new Date().toISOString().split('T')[0],
+        updatedAt: new Date().toISOString().split('T')[0],
+      };
+
+      const res = await adminFetch('/api/admin/showcase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(toShowcasePayload(copy)),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to duplicate project.');
+        return;
+      }
+
+      if (!data.project) {
+        showToast('Duplicate was reported as successful but no persisted project was returned.');
+        return;
+      }
+
+      const persisted = mapShowcaseRecord(data.project);
+      showcaseStore.addProject(persisted);
+      showToast(
+        data.warning || `Duplicated "${project.title}" in persistent storage.`
+      );
+    } catch {
+      showToast('Error duplicating project.');
+    }
+  };
+
+  const handleResetShowcase = async () => {
+    if (!confirm('Replace the current showcase catalog with the official default projects? This removes custom projects from shared storage.')) {
+      return;
+    }
+
+    try {
+      const res = await adminFetch('/api/admin/showcase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reset',
+          projects: INITIAL_PROJECTS.map(toShowcasePayload),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to reset showcase catalog.');
+        return;
+      }
+
+      if (!Array.isArray(data.projects)) {
+        showToast('Reset did not return the persisted showcase catalog. Nothing was reported as reset.');
+        return;
+      }
+
+      // Trust the verified server response rather than re-seeding the local
+      // store. This keeps the UI aligned with what is actually in persistence.
+      useShowcaseStore.getState().resetToDefaultProjects();
+      useShowcaseStore.setState({
+        projects: data.projects.map(mapShowcaseRecord),
+      });
+      showToast(
+        data.warning || 'Showcase catalog reset and verified in persistent storage.'
+      );
+    } catch {
+      showToast('Error resetting showcase catalog.');
     }
   };
 
@@ -559,7 +735,23 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
             theme: d.settings.theme || prev.theme,
             customLogoUrl: d.settings.custom_logo_url || prev.customLogoUrl,
             customFaviconUrl: d.settings.custom_favicon_url || prev.customFaviconUrl,
-            customWallpaperUrl: d.settings.custom_wallpaper_url !== undefined ? d.settings.custom_wallpaper_url : prev.customWallpaperUrl,
+            customWallpaperUrl:
+              d.settings.custom_wallpaper_url !== undefined
+                ? d.settings.custom_wallpaper_url
+                : prev.customWallpaperUrl,
+            customVideoWallpaperUrl:
+              d.settings.custom_video_wallpaper_url !== undefined
+                ? d.settings.custom_video_wallpaper_url
+                : prev.customVideoWallpaperUrl,
+            videoWallpaperMuted:
+              typeof d.settings.video_wallpaper_muted === 'boolean'
+                ? d.settings.video_wallpaper_muted
+                : prev.videoWallpaperMuted,
+            wallpaperMode: d.settings.wallpaper_mode || prev.wallpaperMode,
+            wallpaperOpacity:
+              typeof d.settings.wallpaper_opacity === 'number'
+                ? d.settings.wallpaper_opacity
+                : prev.wallpaperOpacity,
           }));
         }
       })
@@ -571,23 +763,49 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     setIsSavingBranding(true);
 
     try {
+      const currentSettings = useWindowStore.getState().settings;
+      const isEphemeralUrl = (value: string | null | undefined) =>
+        Boolean(value && (value.startsWith('local:') || value.startsWith('blob:')));
+
+      const imageIsEphemeral = isEphemeralUrl(brandingForm.customWallpaperUrl);
+      const videoIsEphemeral = isEphemeralUrl(brandingForm.customVideoWallpaperUrl);
+      const wallpaperChanged =
+        brandingForm.wallpaper !== currentSettings.wallpaper ||
+        (brandingForm.customWallpaperUrl || '') !== (currentSettings.customWallpaperUrl || '') ||
+        (brandingForm.customVideoWallpaperUrl || '') !==
+          (currentSettings.customVideoWallpaperUrl || '') ||
+        brandingForm.videoWallpaperMuted !== currentSettings.videoWallpaperMuted ||
+        brandingForm.wallpaperMode !== currentSettings.wallpaperMode ||
+        brandingForm.wallpaperOpacity !== currentSettings.wallpaperOpacity;
+
+      const payload: Record<string, unknown> = {
+        brand_name: brandingForm.brandName,
+        site_title: brandingForm.siteTitle,
+        wallpaper: brandingForm.wallpaper,
+        accent_color: brandingForm.accentColor,
+        theme: brandingForm.theme,
+        custom_logo_url: brandingForm.customLogoUrl || null,
+        custom_favicon_url: brandingForm.customFaviconUrl || null,
+        video_wallpaper_muted: brandingForm.videoWallpaperMuted !== false,
+        wallpaper_mode: brandingForm.wallpaperMode,
+        wallpaper_opacity: brandingForm.wallpaperOpacity,
+      };
+
+      // IndexedDB/local blob sentinels are browser-only. Sending them to the
+      // server would be rejected and would also risk persisting a URL that no
+      // other visitor can resolve. Omit them so the current cloud value is
+      // preserved; an explicitly emptied field is still sent as null to clear.
+      if (!imageIsEphemeral) {
+        payload.custom_wallpaper_url = brandingForm.customWallpaperUrl || null;
+      }
+      if (!videoIsEphemeral) {
+        payload.custom_video_wallpaper_url = brandingForm.customVideoWallpaperUrl || null;
+      }
+
       const res = await adminFetch('/api/admin/branding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          brand_name: brandingForm.brandName,
-          site_title: brandingForm.siteTitle,
-          wallpaper: brandingForm.wallpaper,
-          accent_color: brandingForm.accentColor,
-          theme: brandingForm.theme,
-          custom_logo_url: brandingForm.customLogoUrl || null,
-          custom_favicon_url: brandingForm.customFaviconUrl || null,
-          custom_wallpaper_url: brandingForm.customWallpaperUrl || null,
-          custom_video_wallpaper_url: brandingForm.customVideoWallpaperUrl || null,
-          video_wallpaper_muted: brandingForm.videoWallpaperMuted !== false,
-          wallpaper_mode: brandingForm.wallpaperMode,
-          wallpaper_opacity: brandingForm.wallpaperOpacity,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -595,31 +813,56 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         return;
       }
 
-      // 1. Immediately apply to local store upon confirmed persistence
+      // Apply only values the server confirmed as persisted. On a partial
+      // (pre-migration) save, preserve the currently active video settings
+      // instead of clearing or falsely applying them. Browser-only wallpaper
+      // sentinels are also preserved locally because they were intentionally
+      // omitted from the cloud payload.
+      const persisted = data.settings || {};
+      const videoPersisted = !data.warning;
+      const preserveLocalWallpaper = imageIsEphemeral || videoIsEphemeral;
       updateSettings({
-        brandName: brandingForm.brandName,
-        siteTitle: brandingForm.siteTitle,
-        wallpaper: brandingForm.wallpaper as any,
-        wallpaperType: brandingForm.customVideoWallpaperUrl
-          ? 'video'
-          : brandingForm.customWallpaperUrl
-          ? 'image'
-          : 'preset',
-        accentColor: brandingForm.accentColor,
-        theme: brandingForm.theme as any,
-        customLogoUrl: brandingForm.customLogoUrl || null,
-        customFaviconUrl: brandingForm.customFaviconUrl || null,
-        customWallpaperUrl: brandingForm.customWallpaperUrl || null,
-        customVideoWallpaperUrl: brandingForm.customVideoWallpaperUrl || null,
-        videoWallpaperMuted: brandingForm.videoWallpaperMuted !== false,
-        wallpaperMode: brandingForm.wallpaperMode as any,
-        wallpaperOpacity: brandingForm.wallpaperOpacity,
+        brandName: persisted.brand_name || brandingForm.brandName,
+        siteTitle: persisted.site_title || brandingForm.siteTitle,
+        wallpaper: (persisted.wallpaper || brandingForm.wallpaper) as any,
+        ...(videoPersisted
+          ? {
+              videoWallpaperMuted: persisted.video_wallpaper_muted !== false,
+              wallpaperMode: (persisted.wallpaper_mode || 'cover') as any,
+              wallpaperOpacity:
+                typeof persisted.wallpaper_opacity === 'number'
+                  ? persisted.wallpaper_opacity
+                  : brandingForm.wallpaperOpacity,
+            }
+          : {}),
+        ...(videoPersisted && !preserveLocalWallpaper
+          ? {
+              wallpaperType: (persisted.custom_video_wallpaper_url
+                ? 'video'
+                : persisted.custom_wallpaper_url
+                ? 'image'
+                : 'preset') as any,
+              videoWallpaperSource: persisted.custom_video_wallpaper_url
+                ? detectIframeVideoSource(persisted.custom_video_wallpaper_url)
+                : null,
+              customVideoWallpaperUrl: persisted.custom_video_wallpaper_url || null,
+            }
+          : {}),
+        accentColor: persisted.accent_color || brandingForm.accentColor,
+        theme: (persisted.theme || brandingForm.theme) as any,
+        customLogoUrl: persisted.custom_logo_url || null,
+        customFaviconUrl: persisted.custom_favicon_url || null,
+        customWallpaperUrl: preserveLocalWallpaper
+          ? currentSettings.customWallpaperUrl
+          : persisted.custom_wallpaper_url || null,
+        wallpaperUserOverride: currentSettings.wallpaperUserOverride || wallpaperChanged,
       });
 
       showToast(
-        data.destination === 'supabase_and_local'
-          ? 'Branding settings saved & synced to Supabase!'
-          : 'Branding settings saved & confirmed in persistent storage!'
+        data.warning ||
+          (data.destination === 'supabase_production'
+            ? 'Branding settings saved and verified in Supabase.'
+            : 'Branding settings saved and verified in local persistent storage (not shared production storage).')
       );
     } catch {
       showToast('Error connecting to server to save branding.');
@@ -638,21 +881,18 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
 
     try {
-      showToast('Saving video wallpaper to persistent storage...');
-      const activeUrl = await saveVideoWallpaperBlob(file);
+      showToast('Uploading video wallpaper to Supabase Storage...');
+      const uploaded = await uploadAdminFile(file, 'wallpaper-video');
       setBrandingForm((prev) => ({
         ...prev,
-        customVideoWallpaperUrl: activeUrl,
+        customVideoWallpaperUrl: uploaded.url,
       }));
-      updateSettings({
-        wallpaperType: 'video',
-        videoWallpaperSource: 'local',
-        customVideoWallpaperUrl: activeUrl,
-      });
-      showToast(`Video wallpaper "${file.name}" saved & applied!`);
+      showToast(`Video "${file.name}" uploaded. Click Save Branding to publish it.`);
     } catch (err) {
-      console.error('Failed to save video wallpaper:', err);
-      showToast('Failed to save video file to storage.');
+      console.error('Failed to upload video wallpaper:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to upload video file.');
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -704,10 +944,6 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       setIsLoadingMc(false);
     }
   };
-
-  useEffect(() => {
-    fetchMcProducts();
-  }, []);
 
   const [isSavingMc, setIsSavingMc] = useState(false);
 
@@ -764,6 +1000,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const [mediaAssets, setMediaAssets] = useState<any[]>([]);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [isSavingMedia, setIsSavingMedia] = useState(false);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [mediaForm, setMediaForm] = useState({ name: '', url: '', type: 'image' });
 
   const fetchMediaAssets = async () => {
@@ -778,13 +1015,42 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
   };
 
-  useEffect(() => {
-    fetchMediaAssets();
-  }, []);
+  const handleMediaFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingMedia(true);
+    try {
+      showToast(`Uploading "${file.name}" to Supabase Storage...`);
+      const uploaded = await uploadAdminFile(file, 'media');
+      const type = file.type.startsWith('image/')
+        ? 'image'
+        : file.type.startsWith('video/')
+        ? 'video'
+        : file.type === 'application/pdf'
+        ? 'document'
+        : 'image';
+      setMediaForm({
+        name: file.name,
+        url: uploaded.url,
+        type,
+      });
+      showToast('File uploaded. Register the asset to finish.');
+    } catch (err) {
+      console.error('Failed to upload media file:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to upload media file.');
+    } finally {
+      setIsUploadingMedia(false);
+      e.target.value = '';
+    }
+  };
 
   const handleAddMedia = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mediaForm.name.trim() || !mediaForm.url.trim()) return;
+    if (!mediaForm.name.trim() || !mediaForm.url.trim()) {
+      showToast('Asset file name and public URL are required.');
+      return;
+    }
     setIsSavingMedia(true);
     try {
       const res = await adminFetch('/api/admin/media', {
@@ -794,7 +1060,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        showToast('Media asset registered and confirmed!');
+        showToast(data.warning || 'Media asset registered and verified in persistent storage!');
         setIsMediaModalOpen(false);
         setMediaForm({ name: '', url: '', type: 'image' });
         await fetchMediaAssets();
@@ -833,6 +1099,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
   const [isLoadingMusic, setIsLoadingMusic] = useState(false);
   const [isMusicModalOpen, setIsMusicModalOpen] = useState(false);
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [musicDraftId, setMusicDraftId] = useState<string | null>(null);
   const [musicSearch, setMusicSearch] = useState('');
   const [musicGenreFilter, setMusicGenreFilter] = useState('all');
   const [musicStatusFilter, setMusicStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
@@ -877,9 +1144,19 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
   };
 
-  useEffect(() => {
-    fetchMusicTracks();
-  }, []);
+  // The three admin catalogs are protected by the session cookie. Load them
+  // only after authentication succeeds, refresh once per auth transition, and
+  // clear stale admin data after logout. Callback identities are captured in a
+  // ref inside the hook, so inline functions cannot trigger a request loop.
+  useAuthenticatedCatalogRefresh(
+    authState,
+    [fetchMcProducts, fetchMediaAssets, fetchMusicTracks],
+    () => {
+      setMcProducts([]);
+      setMediaAssets([]);
+      setMusicTracks([]);
+    }
+  );
 
   const handleAudioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -895,9 +1172,14 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     }
 
     const ext = lowerName.split('.').pop() || 'mp3';
-    const trackTempId = editingTrackId || `track-${Date.now()}`;
+    let trackId = editingTrackId || musicDraftId;
+    if (!trackId) {
+      trackId = makeEntityId('track');
+      setMusicDraftId(trackId);
+    }
 
-    // Read duration safely using temporary object URL
+    // Read duration safely using a temporary local object URL. The URL itself
+    // is never persisted; only the durable Storage URL is stored.
     const tempUrl = URL.createObjectURL(file);
     const tempAudio = new Audio(tempUrl);
     tempAudio.onloadedmetadata = () => {
@@ -914,20 +1196,22 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
     };
 
     try {
-      showToast(`Saving audio file "${file.name}" to IndexedDB...`);
-      const persistentUrl = await saveMusicAudioBlob(trackTempId, file);
+      showToast(`Uploading audio file "${file.name}" to Supabase Storage...`);
+      const uploaded = await uploadAdminFile(file, 'music-audio', trackId);
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
       setMusicForm((prev) => ({
         ...prev,
-        audio_url: persistentUrl,
+        audio_url: uploaded.url,
         file_format: ext,
         file_size: sizeMB,
         title: prev.title || file.name.replace(/\.[^/.]+$/, ''),
       }));
-      showToast('Audio file saved and verified!');
+      showToast('Audio uploaded. Save the track to publish it.');
     } catch (err) {
-      console.error('Failed to store audio file:', err);
-      showToast('Failed to save audio to local storage.');
+      console.error('Failed to upload audio file:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to upload audio file.');
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -940,17 +1224,25 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
       return;
     }
 
-    const trackTempId = editingTrackId || `track-${Date.now()}`;
+    let trackId = editingTrackId || musicDraftId;
+    if (!trackId) {
+      trackId = makeEntityId('track');
+      setMusicDraftId(trackId);
+    }
+
     try {
-      const coverUrl = await saveMusicCoverBlob(trackTempId, file);
+      showToast('Uploading cover art to Supabase Storage...');
+      const uploaded = await uploadAdminFile(file, 'music-cover', trackId);
       setMusicForm((prev) => ({
         ...prev,
-        cover_url: coverUrl,
+        cover_url: uploaded.url,
       }));
-      showToast('Cover art saved!');
+      showToast('Cover art uploaded. Save the track to publish it.');
     } catch (err) {
-      console.error('Failed to store cover image:', err);
-      showToast('Failed to save cover image.');
+      console.error('Failed to upload cover image:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to upload cover image.');
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -970,9 +1262,10 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
 
     try {
       const isEditing = Boolean(editingTrackId);
+      const trackId = editingTrackId || musicDraftId || makeEntityId('track');
       const payload = {
         ...musicForm,
-        id: editingTrackId || `track-${Date.now()}`,
+        id: trackId,
         tags: typeof musicForm.tags === 'string'
           ? musicForm.tags.split(',').map((t) => t.trim()).filter(Boolean)
           : musicForm.tags,
@@ -990,10 +1283,22 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         return;
       }
 
-      showToast(`Track "${payload.title}" saved & confirmed!`);
+      showToast(data.warning || `Track "${payload.title}" saved and verified!`);
       setIsMusicModalOpen(false);
       setEditingTrackId(null);
+      setMusicDraftId(null);
       setMusicForm(initialMusicForm);
+      if (data.track && data.track.id) {
+        setMusicTracks((prev) => {
+          const idx = prev.findIndex((track) => track.id === data.track.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = data.track;
+            return next;
+          }
+          return [data.track, ...prev];
+        });
+      }
       await fetchMusicTracks();
     } catch {
       showToast('Failed to save music track.');
@@ -1017,6 +1322,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         return;
       }
       await deleteMusicBlobs(id);
+      setMusicTracks((prev) => prev.filter((track) => track.id !== id));
       showToast(`Deleted track "${title}".`);
       await fetchMusicTracks();
     } catch {
@@ -1038,6 +1344,11 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
         return;
       }
       showToast(`Track "${track.title}" is now ${newStatus ? 'Published' : 'Hidden (Draft)'}.`);
+      if (data.track && data.track.id) {
+        setMusicTracks((prev) =>
+          prev.map((entry) => (entry.id === data.track.id ? data.track : entry))
+        );
+      }
       fetchMusicTracks();
     } catch {
       showToast('Error updating status.');
@@ -1423,12 +1734,12 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                   </div>
                   <div>
                     <h3 className="font-bold text-white text-sm">
-                      {supabaseStatus.connected ? 'Supabase Database Connected' : 'Local Storage Fallback Mode'}
+                      {supabaseStatus.connected ? 'Supabase Database Connected' : 'Supabase API Not Reachable'}
                     </h3>
                     <p className="text-[11px] text-slate-400">
                       {supabaseStatus.connected
                         ? `Endpoint: ${supabaseStatus.url}`
-                        : 'Operating securely via browser IndexedDB & localStorage persistence.'}
+                        : 'Public Supabase API check failed. Server-side admin writes still require configured Supabase credentials; browser storage alone is not shared production persistence.'}
                     </p>
                   </div>
                 </div>
@@ -1607,10 +1918,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                   Project Catalog
                 </h3>
                 <button
-                  onClick={() => {
-                    showcaseStore.resetToDefaultProjects();
-                    showToast('Reset showcase to official default projects.');
-                  }}
+                  onClick={handleResetShowcase}
                   className="text-amber-400 hover:text-amber-300 text-[11px] font-medium transition-colors"
                 >
                   Reset Defaults
@@ -1682,10 +1990,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                               <Edit3 size={14} />
                             </button>
                             <button
-                              onClick={() => {
-                                showcaseStore.duplicateProject(p.id);
-                                showToast(`Duplicated ${p.title}`);
-                              }}
+                              onClick={() => handleDuplicateProject(p)}
                               className="p-1.5 rounded-lg text-slate-300 hover:bg-white/10 transition-colors"
                               title="Duplicate Entry"
                             >
@@ -2055,8 +2360,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                     type="button"
                     onClick={() => {
                       setBrandingForm({ ...brandingForm, customLogoUrl: '/avatar.png' });
-                      updateSettings({ customLogoUrl: '/avatar.png' });
-                      showToast('Set main photo to LivingYuji render (/avatar.png)');
+                      showToast('Selected LivingYuji render. Click Save Branding to publish.');
                     }}
                     className="px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium"
                   >
@@ -2135,8 +2439,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                     type="button"
                     onClick={() => {
                       setBrandingForm({ ...brandingForm, customFaviconUrl: '/favicon.png' });
-                      updateSettings({ customFaviconUrl: '/favicon.png' });
-                      showToast('Set favicon to LivingYuji render (/favicon.png)');
+                      showToast('Selected LivingYuji favicon. Click Save Branding to publish.');
                     }}
                     className="px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium"
                   >
@@ -2189,11 +2492,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         type="button"
                         onClick={() => {
                           setBrandingForm({ ...brandingForm, wallpaper: wp });
-                          updateSettings({
-                            wallpaper: wp,
-                            wallpaperType: 'preset',
-                          });
-                          showToast(`Wallpaper changed to preset: ${wp}`);
+                          showToast(`Selected preset "${wp}". Click Save Branding to publish.`);
                         }}
                         className={`p-3 rounded-xl border text-left flex flex-col justify-between h-20 capitalize font-medium transition-all ${
                           (settings.wallpaperType === 'preset' || (!settings.wallpaperType && !settings.customVideoWallpaperUrl && !settings.customWallpaperUrl)) &&
@@ -2291,12 +2590,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       onClick={async () => {
                         await clearVideoWallpaperBlob();
                         setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: '' });
-                        updateSettings({
-                          wallpaperType: brandingForm.customWallpaperUrl ? 'image' : 'preset',
-                          videoWallpaperSource: null,
-                          customVideoWallpaperUrl: null,
-                        });
-                        showToast('Video wallpaper removed');
+                        showToast('Video cleared from the editor. Click Save Branding to remove it from the site.');
                       }}
                       className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1"
                     >
@@ -2345,13 +2639,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       type="url"
                       value={brandingForm.customVideoWallpaperUrl}
                       onChange={(e) => {
-                        const url = e.target.value;
-                        setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: url });
-                        updateSettings({
-                          wallpaperType: url ? 'video' : (brandingForm.customWallpaperUrl ? 'image' : 'preset'),
-                          videoWallpaperSource: url ? 'url' : null,
-                          customVideoWallpaperUrl: url || null,
-                        });
+                        setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: e.target.value });
                       }}
                       placeholder="Or enter direct video link (.mp4 or .webm)"
                       className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:border-[#0078D4] outline-none font-mono text-[11px]"
@@ -2382,12 +2670,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         type="button"
                         onClick={() => {
                           setBrandingForm({ ...brandingForm, customVideoWallpaperUrl: preset.url });
-                          updateSettings({
-                            wallpaperType: 'video',
-                            videoWallpaperSource: 'url',
-                            customVideoWallpaperUrl: preset.url,
-                          });
-                          showToast(`Applied "${preset.name}" video wallpaper!`);
+                          showToast(`Selected "${preset.name}". Click Save Branding to publish.`);
                         }}
                         className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
                           brandingForm.customVideoWallpaperUrl === preset.url
@@ -2410,7 +2693,6 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                     onChange={(e) => {
                       const muted = e.target.checked;
                       setBrandingForm({ ...brandingForm, videoWallpaperMuted: muted });
-                      updateSettings({ videoWallpaperMuted: muted });
                     }}
                     className="rounded accent-purple-500 cursor-pointer"
                   />
@@ -2441,8 +2723,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       type="button"
                       onClick={() => {
                         setBrandingForm({ ...brandingForm, accentColor: c.color });
-                        updateSettings({ accentColor: c.color });
-                        showToast(`Accent color updated to ${c.name}`);
+                        showToast(`Selected ${c.name}. Click Save Branding to publish.`);
                       }}
                       className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
                         brandingForm.accentColor === c.color
@@ -3478,6 +3759,26 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                   </div>
 
                   <form onSubmit={handleAddMedia} className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-semibold text-slate-300 block">
+                        Upload File to Supabase Storage
+                      </label>
+                      <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-colors">
+                        <Upload size={14} />
+                        <span>{isUploadingMedia ? 'Uploading...' : 'Choose File'}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/avif,image/x-icon,application/pdf,video/mp4,video/webm"
+                          onChange={handleMediaFileUpload}
+                          disabled={isUploadingMedia}
+                          className="hidden"
+                        />
+                      </label>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        A successful upload fills the durable public URL below. Browser blob/local URLs are rejected.
+                      </p>
+                    </div>
+
                     <div className="space-y-1">
                       <label className="text-[11px] font-semibold text-slate-300">Asset File Name *</label>
                       <input
@@ -3526,7 +3827,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       </button>
                       <button
                         type="submit"
-                        disabled={isSavingMedia}
+                        disabled={isSavingMedia || isUploadingMedia}
                         className="px-5 py-2 rounded-xl bg-[#0078D4] hover:bg-[#0086F0] disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-sky-500/20 flex items-center gap-2"
                       >
                         {isSavingMedia ? (
@@ -3571,6 +3872,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                   type="button"
                   onClick={() => {
                     setEditingTrackId(null);
+                    setMusicDraftId(makeEntityId('track'));
                     setMusicForm(initialMusicForm);
                     setIsMusicModalOpen(true);
                   }}
@@ -3764,6 +4066,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                                   type="button"
                                   onClick={() => {
                                     setEditingTrackId(track.id);
+                                    setMusicDraftId(null);
                                     setMusicForm({
                                       title: track.title,
                                       artist: track.artist,
@@ -3827,6 +4130,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       onClick={() => {
                         setIsMusicModalOpen(false);
                         setEditingTrackId(null);
+                        setMusicDraftId(null);
                       }}
                       className="text-slate-400 hover:text-white"
                     >
@@ -4000,6 +4304,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                         onClick={() => {
                           setIsMusicModalOpen(false);
                           setEditingTrackId(null);
+                          setMusicDraftId(null);
                         }}
                         className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-medium"
                       >
@@ -4203,7 +4508,7 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                           <span>Action: Apply Music Library Cloud Migration</span>
                         </div>
                         <p className="text-[11px] text-slate-300 leading-relaxed">
-                          The remote Supabase instance does not have the <code className="font-mono text-white">music_tracks</code> table yet. Tracks are currently safely persisted in local storage. To sync tracks directly to cloud Supabase, run <code className="font-mono text-white">supabase/migrations/20261025_complete_setup.sql</code> in your Supabase SQL Editor.
+                          The remote Supabase instance does not have the <code className="font-mono text-white">music_tracks</code> table yet. Local persistence is not shared production storage. Apply the prepared <code className="font-mono text-white">supabase/migrations/20261026_phase_b_schema_storage_foundation.sql</code> migration in the Supabase SQL Editor before publishing tracks.
                         </p>
                       </div>
                     )}
@@ -4226,23 +4531,35 @@ export function AdminPanelApp({ isStandalonePage = false }: AdminPanelAppProps) 
                       <div className="grid grid-cols-3 gap-2">
                         <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-center">
                           <div className="text-[10px] text-slate-400">Canary Write</div>
-                          <div className="font-bold text-xs mt-1 text-emerald-400 flex items-center justify-center gap-1">
-                            <Check size={12} />
-                            <span>Passed</span>
+                          <div
+                            className={`font-bold text-xs mt-1 flex items-center justify-center gap-1 ${
+                              diagnosticData.canary_write_test?.write_ok ? 'text-emerald-400' : 'text-red-400'
+                            }`}
+                          >
+                            {diagnosticData.canary_write_test?.write_ok ? <Check size={12} /> : <AlertCircle size={12} />}
+                            <span>{diagnosticData.canary_write_test?.write_ok ? 'Passed' : 'Failed'}</span>
                           </div>
                         </div>
                         <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-center">
                           <div className="text-[10px] text-slate-400">Readback</div>
-                          <div className="font-bold text-xs mt-1 text-emerald-400 flex items-center justify-center gap-1">
-                            <Check size={12} />
-                            <span>Passed</span>
+                          <div
+                            className={`font-bold text-xs mt-1 flex items-center justify-center gap-1 ${
+                              diagnosticData.canary_write_test?.read_ok ? 'text-emerald-400' : 'text-red-400'
+                            }`}
+                          >
+                            {diagnosticData.canary_write_test?.read_ok ? <Check size={12} /> : <AlertCircle size={12} />}
+                            <span>{diagnosticData.canary_write_test?.read_ok ? 'Passed' : 'Failed'}</span>
                           </div>
                         </div>
                         <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-center">
                           <div className="text-[10px] text-slate-400">Cleanup</div>
-                          <div className="font-bold text-xs mt-1 text-emerald-400 flex items-center justify-center gap-1">
-                            <Check size={12} />
-                            <span>Cleaned</span>
+                          <div
+                            className={`font-bold text-xs mt-1 flex items-center justify-center gap-1 ${
+                              diagnosticData.canary_write_test?.cleanup_ok ? 'text-emerald-400' : 'text-red-400'
+                            }`}
+                          >
+                            {diagnosticData.canary_write_test?.cleanup_ok ? <Check size={12} /> : <AlertCircle size={12} />}
+                            <span>{diagnosticData.canary_write_test?.cleanup_ok ? 'Cleaned' : 'Failed'}</span>
                           </div>
                         </div>
                       </div>

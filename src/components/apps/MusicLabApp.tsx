@@ -102,50 +102,83 @@ export function MusicLabApp() {
   const [isAlbumLiked, setIsAlbumLiked] = useState<boolean>(true);
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
   const [usingRealAudio, setUsingRealAudio] = useState<boolean>(false);
+  const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
 
   const selectedAlbum = albums.find((a) => a.id === selectedAlbumId) || albums[0];
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
-  // Hydrate custom/uploaded music library from API
+  // Hydrate custom/uploaded music library from API. An authoritative empty
+  // response removes the cloud album; only a failed request keeps the demo
+  // catalog, and that fallback is visibly labelled.
   useEffect(() => {
-    fetch('/api/admin/music')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
-          const cloudTracks: Track[] = data.tracks.map((t: any, idx: number) => ({
-            id: t.id,
-            number: idx + 1,
-            title: t.title,
-            artist: t.artist || 'LivingYuji',
-            album: t.album || 'LivingYuji Releases',
-            duration: t.duration || '3:00',
-            durationSec: t.duration_sec || 180,
-            coverGradient: t.cover_gradient || 'from-indigo-600 to-purple-800',
-            audioUrl: t.audio_url,
-            coverUrl: t.cover_url,
-            genre: t.genre || 'Cyber Lo-Fi',
-          }));
+    let isMounted = true;
 
-          // Group into a dedicated Library album
-          const libraryAlbum: Album = {
-            id: 'library-releases',
-            title: 'Master Audio Library',
-            type: 'Catalog',
-            releaseYear: '2026',
-            songsCount: cloudTracks.length,
-            totalTime: `${Math.round(cloudTracks.reduce((acc, c) => acc + c.durationSec, 0) / 60)} min`,
-            description: 'Curated and admin-managed original digital audio tracks, ambient soundscapes, and OSTs.',
-            coverGradient: 'from-blue-900 via-indigo-950 to-slate-950',
-            accentColor: '#38BDF8',
-            tracks: cloudTracks,
-          };
-
-          setAlbums([libraryAlbum, ...ALBUMS]);
+    fetch('/api/admin/music?scope=public', { credentials: 'omit' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success || !Array.isArray(data.tracks)) {
+          throw new Error(data.error || `Music catalog request failed (${response.status}).`);
         }
+        if (!isMounted) return;
+
+        const cloudTracks: Track[] = data.tracks.map((t: any, idx: number) => ({
+          id: t.id,
+          number: idx + 1,
+          title: t.title || 'Untitled Track',
+          artist: t.artist || 'LivingYuji',
+          album: t.album || 'LivingYuji Releases',
+          duration: t.duration || '3:00',
+          durationSec: t.duration_sec || 180,
+          coverGradient: t.cover_gradient || 'from-indigo-600 to-purple-800',
+          audioUrl: t.audio_url,
+          coverUrl: t.cover_url,
+          genre: t.genre || 'Cyber Lo-Fi',
+        }));
+
+        if (cloudTracks.length === 0) {
+          setAlbums(ALBUMS);
+          setSelectedAlbumId((current) => (current === 'library-releases' ? ALBUMS[0].id : current));
+          setCatalogNotice(
+            data.source === 'local_persistent'
+              ? 'The local development music catalog is empty. Showing built-in demo tracks; they are not shared production data.'
+              : null
+          );
+          return;
+        }
+
+        const libraryAlbum: Album = {
+          id: 'library-releases',
+          title: 'Master Audio Library',
+          type: 'Catalog',
+          releaseYear: '2026',
+          songsCount: cloudTracks.length,
+          totalTime: `${Math.round(cloudTracks.reduce((acc, c) => acc + c.durationSec, 0) / 60)} min`,
+          description: 'Curated and admin-managed original digital audio tracks, ambient soundscapes, and OSTs.',
+          coverGradient: 'from-blue-900 via-indigo-950 to-slate-950',
+          accentColor: '#38BDF8',
+          tracks: cloudTracks,
+        };
+
+        setAlbums([libraryAlbum, ...ALBUMS]);
+        setCatalogNotice(
+          data.source === 'local_persistent'
+            ? 'Showing the development-only local music catalog. Published cloud tracks may differ.'
+            : null
+        );
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (isMounted) {
+          setCatalogNotice(
+            `Live music catalog unavailable (${error instanceof Error ? error.message : 'network error'}). Showing built-in demo tracks.`
+          );
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Web Audio Synth for ambient playback fallback
@@ -354,7 +387,7 @@ export function MusicLabApp() {
               Playlists & Albums
             </div>
 
-            {ALBUMS.map((alb) => {
+            {albums.map((alb) => {
               const isSelected = alb.id === selectedAlbumId;
               return (
                 <button
@@ -381,6 +414,12 @@ export function MusicLabApp() {
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto window-scroll bg-gradient-to-b from-[#1E2430] to-[#121212] flex flex-col">
+          {catalogNotice && (
+            <div className="mx-7 mt-4 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+              <span>{catalogNotice}</span>
+            </div>
+          )}
           {/* Album Hero Header */}
           <div className="p-7 flex items-end gap-6 bg-gradient-to-b from-[#2B3548] to-transparent">
             {/* Glowing Album Art Box */}

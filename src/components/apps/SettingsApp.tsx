@@ -86,6 +86,7 @@ export function SettingsApp() {
         wallpaperType: 'video',
         videoWallpaperSource: 'local',
         customVideoWallpaperUrl: blobUrl,
+        wallpaperUserOverride: true,
       });
     } catch (err) {
       console.error('Failed to save video wallpaper:', err);
@@ -105,6 +106,7 @@ export function SettingsApp() {
       updateSettings({
         wallpaperType: 'image',
         customWallpaperUrl: blobUrl,
+        wallpaperUserOverride: true,
       });
     } catch (err) {
       console.error('Failed to save image wallpaper:', err);
@@ -357,7 +359,7 @@ export function SettingsApp() {
                   {settings.customVideoWallpaperUrl && settings.wallpaperType !== 'video' && (
                     <button
                       type="button"
-                      onClick={() => updateSettings({ wallpaperType: 'video' })}
+                      onClick={() => updateSettings({ wallpaperType: 'video', wallpaperUserOverride: true })}
                       className="px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[11px] font-semibold hover:bg-purple-500/30 transition-colors"
                     >
                       ▶ Apply Video Wallpaper
@@ -372,6 +374,7 @@ export function SettingsApp() {
                           wallpaperType: settings.customWallpaperUrl ? 'image' : 'preset',
                           videoWallpaperSource: null,
                           customVideoWallpaperUrl: null,
+                          wallpaperUserOverride: true,
                         });
                         setVideoUrlInput('');
                       }}
@@ -427,6 +430,7 @@ export function SettingsApp() {
                         wallpaperType: url ? 'video' : (settings.customWallpaperUrl ? 'image' : 'preset'),
                         videoWallpaperSource: url ? 'url' : null,
                         customVideoWallpaperUrl: url || null,
+                        wallpaperUserOverride: true,
                       });
                     }}
                     placeholder="Or paste direct video URL (.mp4, .webm)"
@@ -447,6 +451,7 @@ export function SettingsApp() {
                           wallpaperType: 'video',
                           videoWallpaperSource: 'url',
                           customVideoWallpaperUrl: url,
+                          wallpaperUserOverride: true,
                         });
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 border border-white/10 hover:border-emerald-500/50 text-[11px] text-emerald-400 text-left truncate transition-colors"
@@ -462,6 +467,7 @@ export function SettingsApp() {
                           wallpaperType: 'video',
                           videoWallpaperSource: 'url',
                           customVideoWallpaperUrl: url,
+                          wallpaperUserOverride: true,
                         });
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 border border-white/10 hover:border-sky-500/50 text-[11px] text-sky-400 text-left truncate transition-colors"
@@ -477,6 +483,7 @@ export function SettingsApp() {
                           wallpaperType: 'video',
                           videoWallpaperSource: 'url',
                           customVideoWallpaperUrl: url,
+                          wallpaperUserOverride: true,
                         });
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 border border-white/10 hover:border-purple-500/50 text-[11px] text-purple-400 text-left truncate transition-colors"
@@ -501,6 +508,7 @@ export function SettingsApp() {
                     onClick={() =>
                       updateSettings({
                         videoWallpaperMuted: !(settings.videoWallpaperMuted !== false),
+                        wallpaperUserOverride: true,
                       })
                     }
                     className={`w-10 h-5 rounded-full transition-colors relative p-0.5 ${
@@ -535,7 +543,7 @@ export function SettingsApp() {
                     {settings.wallpaperType !== 'image' && (
                       <button
                         type="button"
-                        onClick={() => updateSettings({ wallpaperType: 'image' })}
+                        onClick={() => updateSettings({ wallpaperType: 'image', wallpaperUserOverride: true })}
                         className="px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[11px] font-semibold hover:bg-sky-500/30 transition-colors"
                       >
                         ▶ Apply Image
@@ -548,6 +556,7 @@ export function SettingsApp() {
                         updateSettings({
                           wallpaperType: 'preset',
                           customWallpaperUrl: null,
+                          wallpaperUserOverride: true,
                         });
                       }}
                       className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"
@@ -578,6 +587,7 @@ export function SettingsApp() {
                     updateSettings({
                       wallpaperType: e.target.value ? 'image' : 'preset',
                       customWallpaperUrl: e.target.value || null,
+                      wallpaperUserOverride: true,
                     })
                   }
                   placeholder="Or paste image URL (https://...)"
@@ -597,6 +607,7 @@ export function SettingsApp() {
                       updateSettings({
                         wallpaperType: 'preset',
                         wallpaper: wp.id,
+                        wallpaperUserOverride: true,
                       });
                     }}
                     className={`p-3.5 rounded-xl border text-left transition-all flex flex-col gap-2.5 ${

@@ -7,6 +7,8 @@ import {
   ADMIN_COOKIE_NAME,
   ADMIN_COOKIE_OPTIONS,
   getClientIp,
+  isAdminAuthConfigured,
+  isAuthorizedAdminUser,
 } from '@/lib/auth/adminAuth';
 
 function sanitizeReturnTo(url: string | null | undefined): string {
@@ -23,6 +25,17 @@ function sanitizeReturnTo(url: string | null | undefined): string {
 
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
+  const isJson = req.headers.get('content-type')?.includes('application/json');
+
+  // 0. Fail closed when production admin auth is misconfigured. No token is
+  // issued and no credential is evaluated without both required secrets.
+  if (!isAdminAuthConfigured()) {
+    const errorMsg = 'Administrator authentication is not configured on this deployment.';
+    if (isJson) {
+      return NextResponse.json({ success: false, error: errorMsg }, { status: 503 });
+    }
+    return NextResponse.redirect(new URL('/admin?error=not_configured', req.url));
+  }
 
   // 1. Rate Limiting Check
   const rateLimit = checkLoginRateLimit(ip);
@@ -39,7 +52,6 @@ export async function POST(req: NextRequest) {
   let password = '';
   let passphrase = '';
   let returnTo = '/admin/dashboard';
-  const isJson = req.headers.get('content-type')?.includes('application/json');
 
   if (isJson) {
     try {
@@ -106,16 +118,28 @@ export async function POST(req: NextRequest) {
 
     try {
       const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false },
+      });
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-      if (error || !data.session) {
+      if (error || !data.session || !data.user) {
         const remaining = rateLimit.remainingAttempts;
         const errorMsg = `Invalid credentials. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`;
         if (isJson) {
           return NextResponse.json({ success: false, error: errorMsg }, { status: 401 });
         }
         return NextResponse.redirect(new URL('/admin?error=invalid_credentials', req.url));
+      }
+
+      // A valid Supabase login is not enough: the account must also be an
+      // authorized administrator. Never trust user_metadata.role here.
+      if (!isAuthorizedAdminUser(data.user)) {
+        const errorMsg = 'This account is not authorized for administrator access.';
+        if (isJson) {
+          return NextResponse.json({ success: false, error: errorMsg }, { status: 403 });
+        }
+        return NextResponse.redirect(new URL('/admin?error=not_authorized', req.url));
       }
 
       resetLoginRateLimit(ip);

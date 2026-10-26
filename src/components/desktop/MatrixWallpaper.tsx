@@ -1,18 +1,35 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useWindowStore } from '@/store/windowStore';
+import { STREAMABLE_FALLBACK_VIDEO_URL, useWindowStore } from '@/store/windowStore';
 import {
   loadVideoWallpaperBlob,
   getActiveVideoBlobUrl,
   getActiveImageBlobUrl,
   resolveWallpaperMediaUrl,
 } from '@/lib/storage/wallpaperStorage';
+import { isApprovedIframeUrl } from '@/lib/validation/urls';
+
+/** Static fallback background image when video fails or reduced motion is active */
+const FALLBACK_BG_STYLE: React.CSSProperties = {
+  background: 'linear-gradient(135deg, #0E121A 0%, #182335 40%, #0C0F16 100%)',
+};
 
 export function MatrixWallpaper() {
   const { settings } = useWindowStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Respect prefers-reduced-motion
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const [resolvedVideoUrl, setResolvedVideoUrl] = useState<string | null>(() => {
     // If it's a remote URL, we can start with it immediately
@@ -30,6 +47,8 @@ export function MatrixWallpaper() {
     return getActiveImageBlobUrl();
   });
   const [isVideoError, setIsVideoError] = useState(false);
+  const [isImageError, setIsImageError] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   // Determine wallpaper mode
   const isVideoMode =
@@ -38,17 +57,35 @@ export function MatrixWallpaper() {
       settings.wallpaperType !== 'image' &&
       settings.wallpaperType !== 'preset');
 
-  // Load / Re-hydrate local video wallpaper from IndexedDB if necessary
-  useEffect(() => {
-    if (!isVideoMode) return;
+  const configuredVideoUrl = settings.customVideoWallpaperUrl || null;
+  // If an explicitly selected/server image fails to decode, fall back to the
+  // configured video and finally to the approved Streamable fallback before
+  // rendering the static preset. The same iframe allowlist used by the API is
+  // applied here so legacy/unapproved URLs never become executable iframes.
+  const activeVideoUrl = isVideoMode
+    ? configuredVideoUrl
+    : isImageError
+    ? configuredVideoUrl || STREAMABLE_FALLBACK_VIDEO_URL
+    : null;
+  const activeVideoIsApprovedIframe = isApprovedIframeUrl(activeVideoUrl);
+  const iframeRequested =
+    Boolean(activeVideoUrl) &&
+    (settings.videoWallpaperSource === 'iframe' || activeVideoIsApprovedIframe);
+  const isIframeMode = iframeRequested && activeVideoIsApprovedIframe;
+  const hasUnsafeIframe = iframeRequested && !activeVideoIsApprovedIframe;
 
-    const raw = settings.customVideoWallpaperUrl;
-    if (!raw) {
-      setResolvedVideoUrl(null);
+  // Load / Re-hydrate local video wallpaper from IndexedDB if necessary.
+  // Resetting first also clears a previous video/iframe error when the source
+  // or URL changes.
+  useEffect(() => {
+    setIsVideoError(false);
+
+    if (!activeVideoUrl || hasUnsafeIframe || isIframeMode) {
+      if (!activeVideoUrl || hasUnsafeIframe) setResolvedVideoUrl(null);
       return;
     }
 
-    setIsVideoError(false);
+    const raw = activeVideoUrl;
 
     // If it's a remote URL, use directly
     if (!raw.startsWith('local:') && !raw.startsWith('blob:')) {
@@ -71,7 +108,14 @@ export function MatrixWallpaper() {
     return () => {
       isCancelled = true;
     };
-  }, [isVideoMode, settings.customVideoWallpaperUrl, settings.videoWallpaperSource]);
+  }, [activeVideoUrl, hasUnsafeIframe, isIframeMode]);
+
+  // A newly selected embed must not inherit the loaded state of the previous
+  // one, otherwise the fallback layer can disappear before the new iframe is
+  // ready.
+  useEffect(() => {
+    setIframeLoaded(false);
+  }, [activeVideoUrl, isIframeMode]);
 
   // Load / Re-hydrate local image wallpaper from IndexedDB if necessary
   useEffect(() => {
@@ -88,12 +132,47 @@ export function MatrixWallpaper() {
     };
   }, [settings.customWallpaperUrl]);
 
+  // Reset the image error immediately when the configured image changes, then
+  // preload the resolved URL so a broken image can fall through explicitly
+  // instead of leaving an invisible background.
+  useEffect(() => {
+    setIsImageError(false);
+  }, [settings.customWallpaperUrl]);
+
+  useEffect(() => {
+    if (!resolvedImageUrl || typeof window === 'undefined' || typeof window.Image === 'undefined') {
+      return;
+    }
+
+    let isCancelled = false;
+    const probe = new window.Image();
+    probe.onerror = () => {
+      if (!isCancelled) setIsImageError(true);
+    };
+    probe.src = resolvedImageUrl;
+
+    return () => {
+      isCancelled = true;
+      probe.onload = null;
+      probe.onerror = null;
+    };
+  }, [resolvedImageUrl]);
+
   // Robust HTML5 video autoplay & mute synchronization
   const isMuted = settings.videoWallpaperMuted !== false;
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !resolvedVideoUrl || !isVideoMode || isVideoError) return;
+    if (
+      !video ||
+      !activeVideoUrl ||
+      !resolvedVideoUrl ||
+      isIframeMode ||
+      hasUnsafeIframe ||
+      isVideoError
+    ) {
+      return;
+    }
 
     // Directly assign DOM properties to satisfy browser autoplay policies
     video.muted = isMuted;
@@ -112,7 +191,7 @@ export function MatrixWallpaper() {
         });
       });
     }
-  }, [resolvedVideoUrl, isVideoMode, isMuted, isVideoError]);
+  }, [activeVideoUrl, resolvedVideoUrl, isIframeMode, hasUnsafeIframe, isMuted, isVideoError]);
 
   // Matrix code canvas animation (shown when matrix theme is active)
   useEffect(() => {
@@ -189,8 +268,30 @@ export function MatrixWallpaper() {
 
   const customWp = resolvedImageUrl || settings.customWallpaperUrl;
   const wpMode = settings.wallpaperMode || 'cover';
-  const shouldRenderVideo = isVideoMode && Boolean(resolvedVideoUrl) && !isVideoError;
-  const shouldRenderImage = !shouldRenderVideo && Boolean(customWp) && !customWp?.startsWith('local:') && settings.wallpaperType !== 'preset';
+
+  // Render decisions
+  const shouldRenderIframe =
+    Boolean(activeVideoUrl) &&
+    isIframeMode &&
+    !hasUnsafeIframe &&
+    !isVideoError &&
+    !prefersReducedMotion &&
+    !settings.reducedMotion;
+  const shouldRenderVideo =
+    Boolean(activeVideoUrl) &&
+    !isIframeMode &&
+    !hasUnsafeIframe &&
+    Boolean(resolvedVideoUrl) &&
+    !isVideoError &&
+    !prefersReducedMotion &&
+    !settings.reducedMotion;
+  const shouldRenderImage =
+    !shouldRenderVideo &&
+    !shouldRenderIframe &&
+    Boolean(customWp) &&
+    !isImageError &&
+    !customWp?.startsWith('local:') &&
+    settings.wallpaperType !== 'preset';
 
   // Configurable overlay opacity
   const baseOverlay =
@@ -202,8 +303,38 @@ export function MatrixWallpaper() {
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-0">
-      {/* 1. Video wallpaper layer */}
-      {shouldRenderVideo ? (
+      {/* 1a. Iframe video wallpaper layer (Streamable, YouTube, Vimeo, etc.) */}
+      {shouldRenderIframe ? (
+        <>
+          {/* Static fallback behind iframe while it loads */}
+          {!iframeLoaded && (
+            <div className="absolute inset-0" style={FALLBACK_BG_STYLE} />
+          )}
+          <iframe
+            key={activeVideoUrl}
+            src={activeVideoUrl!}
+            title="Desktop video wallpaper"
+            className="absolute inset-0 w-full h-full border-0 pointer-events-none"
+            style={{
+              objectFit: 'cover',
+              opacity: iframeLoaded ? 1 : 0,
+              transition: 'opacity 0.8s ease-in-out',
+              /* Scale up the iframe to crop away Streamable player UI and
+                 make the video fill the viewport like object-fit: cover */
+              transform: 'scale(1.15)',
+              transformOrigin: 'center center',
+            }}
+            allow="autoplay; encrypted-media"
+            loading="lazy"
+            onLoad={() => setIframeLoaded(true)}
+            onError={() => {
+              console.warn('Iframe wallpaper failed to load:', activeVideoUrl);
+              setIsVideoError(true);
+            }}
+          />
+        </>
+      ) : shouldRenderVideo ? (
+        /* 1b. Native HTML5 video wallpaper layer */
         <video
           ref={videoRef}
           key={resolvedVideoUrl}
@@ -231,12 +362,12 @@ export function MatrixWallpaper() {
           }}
         />
       ) : (
-        /* 3. Default textured cyberpunk background */
-        <div className="absolute inset-0 bg-[#0E121A] bg-[radial-gradient(ellipse_at_80%_30%,#182335_0%,#0C0F16_80%)]" />
+        /* 3. Default textured cyberpunk background / fallback */
+        <div className="absolute inset-0" style={FALLBACK_BG_STYLE} />
       )}
 
       {/* Dark overlay for contrast and icon readability */}
-      {shouldRenderVideo ? (
+      {shouldRenderVideo || shouldRenderIframe ? (
         <div
           className="absolute inset-0 bg-[#0E121A] pointer-events-none"
           style={{ opacity: videoOverlayOpacity }}
@@ -249,12 +380,12 @@ export function MatrixWallpaper() {
       ) : null}
 
       {/* Matrix code canvas (rendered if matrix theme and no video/image) */}
-      {!shouldRenderVideo && !shouldRenderImage && settings.wallpaper === 'matrix' && (
+      {!shouldRenderVideo && !shouldRenderIframe && !shouldRenderImage && settings.wallpaper === 'matrix' && (
         <canvas ref={canvasRef} className="absolute inset-0 opacity-80 pointer-events-none" />
       )}
 
       {/* Cyber Developer Silhouette Graphic (when using default preset) */}
-      {!shouldRenderVideo && !shouldRenderImage && (
+      {!shouldRenderVideo && !shouldRenderIframe && !shouldRenderImage && (
         <div className="absolute bottom-12 right-16 w-[420px] h-[580px] pointer-events-none opacity-90 hidden lg:block">
           <svg
             viewBox="0 0 400 560"
@@ -303,6 +434,13 @@ export function MatrixWallpaper() {
             </defs>
           </svg>
         </div>
+      )}
+
+      {/* Reduced motion notice (invisible, accessibility helper) */}
+      {(prefersReducedMotion || settings.reducedMotion) && isVideoMode && (
+        <span className="sr-only">
+          Animated background paused because reduced motion is preferred.
+        </span>
       )}
 
       {/* Bottom Right Watermark */}

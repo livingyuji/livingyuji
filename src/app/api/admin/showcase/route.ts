@@ -1,12 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAuthenticatedAdmin } from '@/lib/auth/adminAuth';
-import { getShowcaseProjects, saveShowcaseProject, deleteShowcaseProject } from '@/lib/storage/serverStore';
+import {
+  getShowcaseProjects,
+  saveShowcaseProject,
+  deleteShowcaseProject,
+  resetShowcaseProjects,
+} from '@/lib/storage/serverStore';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+function errorStatus(message: string): number {
+  if (/browser-only URL|must be an absolute http\(s\) URL|root-relative media path|unapproved iframe provider|must be a URL string/i.test(message)) {
+    return 400;
+  }
+  return /Apply the prepared migration|not configured in this production environment/i.test(message) ? 503 : 500;
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const result = await getShowcaseProjects();
+    const forcePublic = (() => {
+      try {
+        return new URL(req.url).searchParams.get('scope') === 'public';
+      } catch {
+        return false;
+      }
+    })();
+    const isAdmin = !forcePublic && (await isAuthenticatedAdmin(req));
+    const result = await getShowcaseProjects(isAdmin);
     return NextResponse.json({
       success: true,
       projects: result.projects,
@@ -14,7 +34,7 @@ export async function GET() {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -29,24 +49,39 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { title } = body;
 
-    if (!title || typeof title !== 'string' || !title.trim()) {
-      return NextResponse.json({ success: false, error: 'Project title is required.' }, { status: 400 });
+    if (body?.action === 'reset') {
+      const result = await resetShowcaseProjects(body.projects);
+      return NextResponse.json({
+        success: true,
+        message: 'Showcase catalog reset and verified in persistent storage.',
+        projects: result.projects,
+        destination: result.destination,
+      });
+    }
+
+    const hasId = typeof body?.id === 'string' && body.id.trim().length > 0;
+    const hasTitle = typeof body?.title === 'string' && body.title.trim().length > 0;
+
+    if (!hasId && !hasTitle) {
+      return NextResponse.json(
+        { success: false, error: 'Project title is required when creating a project.' },
+        { status: 400 }
+      );
     }
 
     const result = await saveShowcaseProject(body);
 
     return NextResponse.json({
       success: true,
-      message: 'Showcase project saved and persisted successfully.',
+      message: 'Showcase project saved and verified in persistent storage.',
       project: result.project,
       destination: result.destination,
       warning: result.warning,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to save showcase project.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -74,6 +109,6 @@ export async function DELETE(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to delete showcase project.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }

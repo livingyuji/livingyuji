@@ -15,7 +15,7 @@ A comprehensive, evidence-based investigation was conducted on LivingYuji OS to 
 1. **Root Cause #1 (Frontend State Bypass vs. API 401 Rejection):** `AdminPanelApp.tsx` initialized `authState` to `'authenticated'` when `isStandalonePage === true` and skipped calling `/api/admin/session`. If a user entered `/admin/dashboard` with a stale or unparsed session cookie, the frontend showed the full admin UI, but every subsequent save failed with HTTP 401 (`Unauthorized: Administrator session required`).
 2. **Root Cause #2 (Cookie-Only Header Rejection):** `isAuthenticatedAdmin` only parsed `req.headers.get('cookie')`. Browser privacy protections (third-party cookie blocking, SameSite=Lax cross-origin navigations, or iframe sandboxing) stripped cookies from API `fetch` requests, rejecting valid admins.
 3. **Root Cause #3 (Remote Database Schema Gap):** Direct live connectivity tests against the configured Supabase instance (`grkeqogkijvudscakihw.supabase.co`) confirmed that while `site_settings`, `minecraft_products`, `showcase_projects`, and `discord_settings` exist, `music_tracks` was missing in the schema cache (`PGRST205`), and storage buckets were empty (`[]`).
-4. **Permanent Dual-Layer Persistence & Safe Diagnostics:** Fixed authentication to support dual Cookie + Bearer header verification (`Authorization: Bearer <token>` and `x-admin-token`), added `credentials: 'include'` to all admin fetches, added a live in-app Diagnostics & Health dashboard backed by `/api/admin/diagnostics`, and generated an idempotent migration (`20261025_complete_setup.sql`). All 21 Jest unit tests and the Next.js production build (27 static pages + dynamic routes) pass with zero errors.
+4. **Permanent Dual-Layer Persistence & Safe Diagnostics:** Fixed authentication to support dual Cookie + Bearer header verification (`Authorization: Bearer <token>` and `x-admin-token`), added `credentials: 'include'` to admin fetches, added a live in-app Diagnostics & Health dashboard backed by `/api/admin/diagnostics`, and prepared the canonical Phase B schema/Storage migration, Phase A write lockdown, and Phase C Showcase visibility migration. The focused Jest suites and the Next.js production build (27 static pages + dynamic routes) pass with zero errors.
 
 ---
 
@@ -26,8 +26,8 @@ A comprehensive, evidence-based investigation was conducted on LivingYuji OS to 
 | **RC-01** | `AdminPanelApp.tsx` | Frontend state set to `'authenticated'` prematurely | Line 77: `useState(isStandalonePage ? 'authenticated' : 'checking')`. In client navigation, skipped `/api/admin/session`, rendering UI even when cookie was missing or expired. | Initialized `authState` to `'checking'`. Always verifies `/api/admin/session` on mount. Redirects to `/admin` if unauthorized on standalone page. |
 | **RC-02** | `adminAuth.ts` | Server-side auth strictly coupled to cookie header | `isAuthenticatedAdmin` only examined `req.headers.get('cookie')`. In modern browsers, iframe embedding or SameSite restrictions strip cookies from fetch calls, causing 401 on saves. | Added dual-transport auth: validates `Authorization: Bearer <token>`, `x-admin-token`, and `lyos-admin-session` cookie via cryptographically signed HMAC-SHA256. |
 | **RC-03** | `AdminPanelApp.tsx` | Client `fetch` calls omitted credentials and auth headers | `fetch('/api/admin/branding', { method: 'POST', ... })` lacked `credentials: 'include'` and Bearer token fallback. | Implemented unified `adminFetch()` callback that injects `credentials: 'include'` and Bearer token, and handles 401 with immediate re-authentication prompts. |
-| **RC-04** | Remote Supabase Database | Table `music_tracks` missing in schema cache | Live test: `[TABLE music_tracks]: ERROR PGRST205 - Could not find the table 'public.music_tracks' in the schema cache`. | Local fallback persistence engine (`data/admin-store.json` + IndexedDB) handles persistence immediately. Created `20261025_complete_setup.sql` for one-click cloud migration. |
-| **RC-05** | Remote Supabase Storage | Storage buckets missing | Live test: `supabase.storage.listBuckets()` returned `[]`. | Local filesystem directories (`public/music`, `public/wallpapers`, `public/assets`) and IndexedDB provide 100% offline-ready fallback. Provided bucket creation SQL in migration. |
+| **RC-04** | Remote Supabase Database | Table `music_tracks` missing in schema cache | Live test: `[TABLE music_tracks]: ERROR PGRST205 - Could not find the table 'public.music_tracks' in the schema cache`. | Local fallback persistence engine (`data/admin-store.json` + IndexedDB) handles development persistence. The prepared Phase B schema/Storage migration, Phase A write lockdown, and Phase C Showcase visibility migration are not applied yet. |
+| **RC-05** | Remote Supabase Storage | Storage buckets missing | Live test: `supabase.storage.listBuckets()` returned `[]`. | The prepared server upload route fails closed with an actionable 503 until the buckets are created. Visitor-wallpaper IndexedDB remains a local-only fallback; it is not shared production storage. Provided bucket creation SQL in the Phase B migration. |
 
 ---
 
@@ -61,8 +61,8 @@ The LivingYuji OS persistence layer employs a resilient **dual-layer persistence
 | **Showcase Projects** | Supabase `showcase_projects` table | `data/admin-store.json` (`showcase_projects`) | Admin Session (HMAC or Supabase) | Live query count = 1 |
 | **Minecraft Store Products** | Supabase `minecraft_products` table | `data/admin-store.json` (`minecraft_products`) | Admin Session (HMAC or Supabase) | Live query count = 1 |
 | **Media Library Assets** | Supabase `media_library` table | `data/admin-store.json` (`media_assets`) | Admin Session (HMAC or Supabase) | Live query count = 0 |
-| **Music Library & Tracks** | Local Store & IndexedDB | `data/admin-store.json` (`music_tracks`) | Admin Session (HMAC or Supabase) | IndexedDB binary storage |
-| **Video Wallpaper** | Browser IndexedDB (`lyos-wallpapers`) | Local Store (`site_settings`) | Admin Session (HMAC or Supabase) | IndexedDB Blob URL playback |
+| **Music Library & Tracks** | Supabase `music_tracks` + Storage `music` (prepared) | `data/admin-store.json` (`music_tracks`); legacy IndexedDB blobs | Admin Session (HMAC or Supabase) | Server route tests; live bucket/migration pending |
+| **Video Wallpaper** | Visitor browser IndexedDB; admin Supabase Storage `wallpapers` (prepared) | `data/admin-store.json` (`site_settings`) | Admin Session for upload; visitor choice is local | IndexedDB local playback; server upload route tests |
 | **Desktop Icon Layouts** | Browser `localStorage` | System reset fallback (`GRID_CONFIG`) | Public client preference | Layout coordinate check |
 
 ---
@@ -113,15 +113,15 @@ Canary delete cleanup: SUCCESS (Row purged from database)
 
 | Feature | Save / Commit Handler | Persistence Destination | Status Label | Verification Details |
 |---|---|---|---|---|
-| **Site Branding & Theme** | `handleSaveBranding` → `POST /api/admin/branding` | Supabase `site_settings` & `data/admin-store.json` | `FIXED AND VERIFIED` | Tested via live canary write, readback, and unit tests. |
+| **Site Branding & Theme** | `handleSaveBranding` → `POST /api/admin/branding` | Supabase `site_settings` & `data/admin-store.json` | `CODE COMPLETE` (Cloud video columns pending Phase B) | Save route verifies the returned row; missing wallpaper columns are reported as a partial save, never as full success. |
 | **Discord Purchasing URLs** | `handleSaveDiscordSettings` → `POST /api/admin/discord` | Supabase `discord_settings` & `data/admin-store.json` | `FIXED AND VERIFIED` | Verified live row read (count = 1), local backup sync verified. |
-| **Showcase Projects** | `handleSaveProject` → `POST /api/admin/showcase` | Supabase `showcase_projects` & `data/admin-store.json` | `FIXED AND VERIFIED` | Verified live row read (count = 1), add/edit/delete handlers verified. |
-| **Minecraft Store Products** | `handleSaveMcProduct` → `POST /api/admin/products` | Supabase `minecraft_products` & `data/admin-store.json` | `FIXED AND VERIFIED` | Verified live row read (count = 1), add/delete handlers verified. |
+| **Showcase Projects** | `handleSaveProject` → `POST /api/admin/showcase` | Supabase `showcase_projects` & `data/admin-store.json` | `CODE COMPLETE` (Private statuses pending Phase C) | Add/edit/delete/duplicate/reset use verified server responses; public reads force `scope=public` and filter Private/unpublished rows. |
+| **Minecraft Store Products** | `handleSaveMcProduct` → `POST /api/admin/products` | Supabase `minecraft_products` & `data/admin-store.json` | `FIXED AND VERIFIED` | Verified live row read (count = 1), authenticated add/delete handlers verified; successful empty responses clear the cached catalog. |
 | **Media Library Assets** | `handleAddMedia` → `POST /api/admin/media` | Supabase `media_library` & `data/admin-store.json` | `FIXED AND VERIFIED` | Table exists on Supabase; local store persistence verified. |
-| **Music Library Metadata** | `handleSaveMusicTrack` → `POST /api/admin/music` | `data/admin-store.json` (`music_tracks`) | `FIXED AND VERIFIED` (Local) / `FIXED IN CODE, EXTERNAL CONFIGURATION REQUIRED` (Cloud) | Dual-layer persistence safely preserves tracks in JSON store; Supabase cloud sync requires running `20261025_complete_setup.sql`. |
-| **Video Wallpaper Binary** | `saveVideoWallpaperBlob` | IndexedDB `lyos-wallpapers` / `wallpaper-video-custom` | `FIXED AND VERIFIED` | Persistent binary chunking tested, avoids 5MB localStorage quota limit. |
-| **Music Audio / Cover Blobs** | `saveMusicAudioBlob` / `saveMusicCoverBlob` | IndexedDB `lyos-music-blobs` | `FIXED AND VERIFIED` | Zero-loss audio and artwork retention across page refreshes. |
-| **HMAC Session Authentication** | `handleDesktopLogin` → `POST /api/admin/signin` | Cookie `lyos-admin-session` + `sessionStorage` token | `FIXED AND VERIFIED` | 21 Jest unit tests verify HMAC generation, timing-safe validation, and header fallbacks. |
+| **Music Library Metadata** | `handleSaveMusicTrack` → `POST /api/admin/music` | Supabase `music_tracks` + Storage (prepared) / `data/admin-store.json` (local) | `CODE COMPLETE` (Cloud migration pending) | Save/update/delete verify the returned row before reporting success; public playback requests only published tracks. Applying Phase B and Phase A remains approval-gated. |
+| **Video Wallpaper Binary** | Visitor Settings → IndexedDB; Admin → `POST /api/admin/upload` | IndexedDB `lyos-wallpapers`; Supabase Storage `wallpapers` (prepared) | `FIXED AND VERIFIED (LOCAL)` / `CLOUD MIGRATION PENDING` | Local blob lifecycle and autoplay verified; server route validates purpose, type, size, and path before upload. Browser `local:`/`blob:` values are never sent as durable branding URLs. |
+| **Music Audio / Cover Blobs** | Admin upload route → Supabase Storage | Storage `music` bucket (`audio/<track-id>/`, `covers/<track-id>/`) | `CODE COMPLETE` (Cloud migration pending) | Server upload route tests cover path/MIME/size validation; no false success when Storage is unconfigured. |
+| **HMAC Session Authentication** | `handleDesktopLogin` → `POST /api/admin/signin` | Cookie `lyos-admin-session` + `sessionStorage` token | `FIXED AND VERIFIED` | Focused Jest tests verify HMAC generation, timing-safe validation, and header fallbacks. |
 
 ---
 
@@ -143,95 +143,81 @@ To ensure complete transparency and prevent undetected regressions, a comprehens
 - Accessible directly from the Control Panel sidebar via the new **Diagnostics & Health** tab (with live green/amber status badge).
 - Features a **Re-Run Diagnostics** button.
 - Displays live status cards for every database table, canary test results, and dual-layer caching.
-- If `music_tracks` is missing on remote Supabase, displays a clear guidance banner and instructions to run `supabase/migrations/20261025_complete_setup.sql`.
+- If `music_tracks` is missing on remote Supabase, displays a clear guidance banner and points to the prepared Phase B schema/Storage migration, Phase A lockdown, and Phase C Showcase visibility migration, with the review checklist in `docs/PHASE_B_SCHEMA_STORAGE_FOUNDATION.md`.
 
 ---
 
 ## 7. Migration Guide for Remote Supabase
 
-To enable direct cloud synchronization for the Music Library and remote storage buckets, execute the consolidated idempotent migration script provided in the repository:
+The earlier consolidated SQL in this section was superseded because its authenticated write policies allowed any registered Supabase account to modify music and Storage objects. Do not paste that old SQL into a project.
 
-**Path:** `supabase/migrations/20261025_complete_setup.sql`
+Use the prepared migrations in this order:
 
-```sql
--- 1. Create music_tracks table
-CREATE TABLE IF NOT EXISTS public.music_tracks (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    artist TEXT NOT NULL,
-    album TEXT NOT NULL,
-    duration TEXT NOT NULL,
-    duration_sec INTEGER NOT NULL DEFAULT 180,
-    genre TEXT DEFAULT 'Cyber Lo-Fi',
-    description TEXT,
-    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-    audio_url TEXT NOT NULL,
-    cover_url TEXT,
-    cover_gradient TEXT DEFAULT 'from-emerald-900 via-teal-950 to-slate-950',
-    published BOOLEAN NOT NULL DEFAULT true,
-    featured BOOLEAN NOT NULL DEFAULT false,
-    track_order INTEGER NOT NULL DEFAULT 0,
-    file_format TEXT NOT NULL DEFAULT 'mp3',
-    file_size TEXT,
-    storage_key TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
+1. `supabase/migrations/20261026_phase_b_schema_storage_foundation.sql`
+   - Creates `public.enquiries` and `public.music_tracks`.
+   - Adds the four video-wallpaper/display columns to `public.site_settings`.
+   - Creates the canonical public buckets `music`, `wallpapers`, `showcase`, and `media` with MIME/size limits.
+   - Keeps enquiries private, allows public read only for `published = true` music tracks, and makes Storage writes service-role-only.
+2. `supabase/migrations/20261026_security_admin_write_lockdown.sql`
+   - Replaces all authenticated-user write policies with service-role-only writes.
+   - Must run after Phase B because it references `public.music_tracks`.
+3. `supabase/migrations/20261026_phase_c_showcase_access.sql`
+   - Adds the optional Showcase `published` flag and `Coming Soon`/`Private` statuses.
+   - Restricts public Showcase reads to published, non-Private rows.
+   - Prepared only; apply after reviewing Phases B and A and only if the visibility workflow is approved.
 
--- 2. Indexes and RLS Policies
-ALTER TABLE public.music_tracks ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public read published music_tracks" ON public.music_tracks
-    FOR SELECT USING (published = true);
-
-CREATE POLICY "Admin read all music_tracks" ON public.music_tracks
-    FOR SELECT USING (auth.role() = 'authenticated' OR auth.role() = 'service_role');
-
-CREATE POLICY "Admin write music_tracks" ON public.music_tracks
-    FOR ALL USING (auth.role() = 'authenticated' OR auth.role() = 'service_role');
-
--- 3. Storage Buckets Setup
-INSERT INTO storage.buckets (id, name, public)
-VALUES 
-    ('music', 'music', true),
-    ('wallpapers', 'wallpapers', true),
-    ('showcase', 'showcase', true),
-    ('media', 'media', true)
-ON CONFLICT (id) DO NOTHING;
-```
+All three files are **prepared but not applied** to the live project. Before applying them, follow the read-only preflight and post-apply verification queries in `docs/PHASE_B_SCHEMA_STORAGE_FOUNDATION.md`. Do not re-run `20261025_complete_setup.sql` or `20261025_music_library.sql` after Phase B; they are historical/overlapping files and can fail on duplicate policies.
 
 ---
 
 ## 8. Verification & Test Execution Log
 
+Verified locally on 2026-10-26. These checks use the local working tree; they do not prove live Supabase or Storage behavior.
+
 ```text
 1. TypeScript Validation:
-   npm run type-check --prefix "b:\Own Plugins\livingyuji-os"
+   npm run type-check
    > tsc --noEmit
    Result: 0 errors (clean compilation).
 
 2. Automated Unit & Integration Tests:
-   npm test --prefix "b:\Own Plugins\livingyuji-os"
+   npx jest --runInBand
+   PASS __tests__/AdminAuthorizationBoundary.test.ts
+   PASS __tests__/AdminCatalogRefresh.test.tsx
    PASS __tests__/AdminDiagnostics.test.ts
+   PASS __tests__/AdminPersistence.test.ts
+   PASS __tests__/MatrixWallpaperFallback.test.tsx
+   PASS __tests__/PhaseCEnquiriesRoute.test.ts
+   PASS __tests__/PhaseCServerStore.test.ts
+   PASS __tests__/PhaseCUploadRoute.test.ts
    PASS __tests__/SafeLinkifiedText.test.ts
    PASS __tests__/ServerlessReadOnlyPersistence.test.ts
-   PASS __tests__/AdminPersistence.test.ts
-   Test Suites: 4 passed, 4 total
-   Tests:       26 passed, 26 total
+   PASS __tests__/UrlValidation.test.ts
+   PASS __tests__/WallpaperPreference.test.tsx
+   Test Suites: 12 passed, 12 total
+   Tests:       98 passed, 98 total
    Snapshots:   0 total
-   Time:        11.975 s
 
 3. Next.js Production Build:
-   npm run build --prefix "b:\Own Plugins\livingyuji-os"
-   ✓ Compiled successfully
-   ✓ Linting and checking validity of types
-   ✓ Collecting page data
-   ✓ Generating static pages (27/27)
-   ✓ Finalizing page optimization
+   npm run build
+   Compiled successfully
+   Linting and checking validity of types (existing warnings, no errors)
+   Generating static pages (27/27)
    Result: Exit code 0 (27 static pages + dynamic route handlers).
+
+4. Diff Hygiene:
+   git diff --check
+   Result: no whitespace errors (line-ending normalization notices only).
 ```
 
----
+Limitations carried into the verification status:
+
+- The Jest suites mock Supabase, Storage, and browser media APIs. They are not a live integration test.
+- Phase B, Phase A, and Phase C migrations remain unapplied. Live tables, RLS policies, buckets, and public URLs are unverified.
+- Uploads are proxied through a server route; Vercel's roughly 4.5 MB function request-body limit is smaller than several route/bucket limits. Signed/direct uploads are not implemented.
+- Upload validation checks extension and declared MIME only, not magic bytes.
+- Replaced or deleted objects are not automatically removed from Storage.
+- The public/browser API key returned `401 Invalid API key` during the earlier read-only inspection; that observation was not re-tested here.
 
 ## 9. Vercel Serverless Read-Only Filesystem (EROFS) Root Cause & Architecture Fix
 

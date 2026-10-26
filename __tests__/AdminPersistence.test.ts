@@ -1,3 +1,14 @@
+const mockCreateServiceClient = jest.fn();
+const mockCreateServerClient = jest.fn();
+
+jest.mock('@/lib/supabase/server', () => ({
+  createServiceClient: (...args: any[]) => mockCreateServiceClient(...args),
+  createServerClient: (...args: any[]) => mockCreateServerClient(...args),
+}));
+
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import {
   getSiteSettings,
   saveSiteSettings,
@@ -25,6 +36,35 @@ import {
 } from '@/lib/auth/adminAuth';
 
 describe('Admin Panel Persistence Engine', () => {
+  const originalDataDir = process.env.LIVINGYUJI_DATA_DIR;
+  let temporaryDataDir = '';
+  let trackedDataBefore: string | null = null;
+
+  beforeAll(async () => {
+    temporaryDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'livingyuji-admin-store-'));
+    process.env.LIVINGYUJI_DATA_DIR = temporaryDataDir;
+    mockCreateServiceClient.mockResolvedValue(null);
+    mockCreateServerClient.mockResolvedValue(null);
+
+    try {
+      trackedDataBefore = await fs.readFile(
+        path.join(process.cwd(), 'data', 'admin-store.json'),
+        'utf8'
+      );
+    } catch {
+      trackedDataBefore = null;
+    }
+  });
+
+  afterAll(async () => {
+    if (originalDataDir === undefined) delete process.env.LIVINGYUJI_DATA_DIR;
+    else process.env.LIVINGYUJI_DATA_DIR = originalDataDir;
+
+    if (temporaryDataDir) {
+      await fs.rm(temporaryDataDir, { recursive: true, force: true });
+    }
+  });
+
   describe('Authentication & Access Control', () => {
     it('verifies correct passphrase and rejects incorrect ones', () => {
       const correct = getExpectedPassphrase();
@@ -241,6 +281,17 @@ describe('Admin Panel Persistence Engine', () => {
 
       const afterDel = await getMediaAssets();
       expect(afterDel.assets.some((a) => a.id === testId)).toBe(false);
+    });
+  });
+
+  describe('Test isolation', () => {
+    it('does not modify the tracked development data file', async () => {
+      if (trackedDataBefore === null) return;
+      const trackedDataAfter = await fs.readFile(
+        path.join(process.cwd(), 'data', 'admin-store.json'),
+        'utf8'
+      );
+      expect(trackedDataAfter).toBe(trackedDataBefore);
     });
   });
 });

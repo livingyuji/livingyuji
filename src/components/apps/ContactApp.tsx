@@ -53,6 +53,8 @@ export function ContactApp() {
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState('');
+  const [successNotice, setSuccessNotice] = useState('');
+  const [deliveryPersistent, setDeliveryPersistent] = useState(true);
   const [copiedTag, setCopiedTag] = useState(false);
 
   const handleCopyDiscord = () => {
@@ -84,6 +86,7 @@ export function ContactApp() {
     setErrors({});
     setSubmitState('loading');
     setSubmitError('');
+    setSuccessNotice('');
 
     try {
       const res = await fetch('/api/enquiries', {
@@ -91,10 +94,12 @@ export function ContactApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
         throw new Error(data.error || 'Submission failed');
       }
+      setDeliveryPersistent(data.persistent !== false);
+      setSuccessNotice(typeof data.message === 'string' ? data.message : '');
       setSubmitState('success');
     } catch (err) {
       setSubmitState('error');
@@ -287,10 +292,23 @@ export function ContactApp() {
               <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/40">
                 <CheckCircle size={28} />
               </div>
-              <h3 className="text-base font-bold text-white">Enquiry Sent Successfully!</h3>
+              <h3 className="text-base font-bold text-white">
+                {deliveryPersistent ? 'Enquiry Sent Successfully!' : 'Enquiry Logged (Development Only)'}
+              </h3>
               <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
-                Thank you for your project submission. LivingYuji will review your specifications and contact you shortly.
+                {deliveryPersistent
+                  ? 'Thank you for your project submission. LivingYuji will review your specifications and contact you shortly.'
+                  : 'This development environment did not persist the enquiry to a shared database. It must not be treated as a delivered message.'}
               </p>
+              {successNotice && (
+                <p
+                  className={`text-[11px] max-w-sm mx-auto leading-relaxed ${
+                    deliveryPersistent ? 'text-slate-400' : 'text-amber-300'
+                  }`}
+                >
+                  {successNotice}
+                </p>
+              )}
               <button
                 onClick={() => {
                   setSubmitState('idle');

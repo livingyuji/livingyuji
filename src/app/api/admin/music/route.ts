@@ -9,9 +9,23 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+function errorStatus(message: string): number {
+  if (/browser-only URL|must be an absolute http\(s\) URL|root-relative media path|unapproved iframe provider|must be a URL string/i.test(message)) {
+    return 400;
+  }
+  return /Apply the prepared migration|not configured in this production environment/i.test(message) ? 503 : 500;
+}
+
 export async function GET(req: NextRequest) {
   try {
-    const isAdmin = await isAuthenticatedAdmin(req);
+    const forcePublic = (() => {
+      try {
+        return new URL(req.url).searchParams.get('scope') === 'public';
+      } catch {
+        return false;
+      }
+    })();
+    const isAdmin = !forcePublic && (await isAuthenticatedAdmin(req));
     const result = await getMusicTracks(isAdmin);
     return NextResponse.json({
       success: true,
@@ -20,7 +34,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -59,7 +73,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to create music track.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -91,7 +105,7 @@ export async function PUT(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to update music track.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -119,6 +133,6 @@ export async function DELETE(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to delete music track.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: errorStatus(message) });
   }
 }

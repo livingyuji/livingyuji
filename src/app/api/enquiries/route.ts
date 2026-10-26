@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/server';
+import { isServerlessReadOnlyEnvironment } from '@/lib/storage/serverStore';
 
+const PHASE_B_MIGRATION = 'supabase/migrations/20261026_phase_b_schema_storage_foundation.sql';
 const RATE_LIMIT_MAP = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const RATE_LIMIT_MAX = 5;
@@ -82,33 +85,79 @@ export async function POST(req: NextRequest) {
       status: 'new',
     };
 
-    // Attempt Supabase storage if configured
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (supabaseUrl && supabaseServiceKey) {
-      try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-          auth: { persistSession: false },
-        });
-        const { error } = await supabase.from('enquiries').insert([enquiry]);
-        if (error) {
-          console.error('Supabase enquiry insert error:', error.message);
-          return NextResponse.json({ error: 'Failed to save enquiry. Please try again.' }, { status: 500 });
-        }
-      } catch (err) {
-        console.error('Supabase client error:', err);
-        return NextResponse.json({ error: 'Backend error. Please try again.' }, { status: 500 });
+    const supabase = await createServiceClient();
+    if (!supabase) {
+      // The Vercel filesystem is read-only and cannot be a contact inbox.
+      // Never report that an enquiry was delivered when nothing persisted it.
+      if (isServerlessReadOnlyEnvironment()) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'enquiries_not_configured',
+            error:
+              'Contact storage is not configured in this environment. Set the Supabase server credentials and apply the enquiries migration before accepting submissions.',
+          },
+          { status: 503 }
+        );
       }
-    } else {
-      // Log locally when Supabase is not configured (development mode)
-      console.log('[Enquiry — Supabase not configured]', JSON.stringify(enquiry, null, 2));
+
+      // Development-only fallback. The response explicitly distinguishes a
+      // local log from a durable database delivery.
+      console.log('[Enquiry — development fallback, not persisted]', JSON.stringify(enquiry, null, 2));
+      return NextResponse.json(
+        {
+          success: true,
+          persistent: false,
+          fallback: 'development_log',
+          message:
+            'Development mode: the enquiry was logged on the server console and was not stored in the database.',
+        },
+        { status: 202 }
+      );
     }
 
-    return NextResponse.json({ success: true, message: 'Enquiry received. Thank you!' }, { status: 200 });
+    const { error } = await supabase.from('enquiries').insert([enquiry]);
+    if (error) {
+      console.error('Supabase enquiry insert error:', error.message);
+      const missingTable =
+        error.code === 'PGRST205' ||
+        error.code === '42P01' ||
+        /does not exist|schema cache|relation .* not found/i.test(error.message || '');
+
+      if (missingTable) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'enquiries_table_missing',
+            error: `Contact storage is not ready. Apply the prepared migration '${PHASE_B_MIGRATION}' and try again.`,
+          },
+          { status: 503 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'enquiry_storage_failed',
+          error: 'The enquiry could not be saved. Please try again shortly.',
+        },
+        { status: 503 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        persistent: true,
+        message: 'Enquiry received and stored. Thank you!',
+      },
+      { status: 200 }
+    );
   } catch (err) {
     console.error('Enquiry API error:', err);
-    return NextResponse.json({ error: 'Server error. Please try again.' }, { status: 500 });
+    return NextResponse.json(
+      { success: false, code: 'enquiry_server_error', error: 'Server error. Please try again.' },
+      { status: 500 }
+    );
   }
 }
