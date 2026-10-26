@@ -19,6 +19,7 @@ export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
   const settings = useWindowStore((state) => state.settings);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Respect prefers-reduced-motion
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
@@ -57,7 +58,7 @@ export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
       settings.wallpaperType !== 'image' &&
       settings.wallpaperType !== 'preset');
 
-  const configuredVideoUrl = settings.customVideoWallpaperUrl || null;
+  const configuredVideoUrl = settings.customVideoWallpaperUrl || STREAMABLE_DEFAULT_VIDEO_URL;
   // If an explicitly selected/server image fails to decode, fall back to the
   // configured video and finally to the approved Streamable fallback before
   // rendering the static preset. The same iframe allowlist used by the API is
@@ -116,6 +117,16 @@ export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
   useEffect(() => {
     setIframeLoaded(false);
   }, [activeVideoUrl, isIframeMode]);
+
+  useEffect(() => {
+    const el = iframeRef.current;
+    if (!el) return;
+    const handleError = () => setIsVideoError(true);
+    el.addEventListener('error', handleError);
+    return () => {
+      el.removeEventListener('error', handleError);
+    };
+  });
 
   // Load / Re-hydrate local image wallpaper from IndexedDB if necessary
   useEffect(() => {
@@ -311,6 +322,7 @@ export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
             <div className="absolute inset-0" style={FALLBACK_BG_STYLE} />
           )}
           <iframe
+            ref={iframeRef}
             key={activeVideoUrl}
             src={activeVideoUrl!}
             title="Desktop video wallpaper"
@@ -329,6 +341,9 @@ export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
             onLoad={() => setIframeLoaded(true)}
             onError={() => {
               console.warn('Iframe wallpaper failed to load:', activeVideoUrl);
+              setIsVideoError(true);
+            }}
+            onErrorCapture={() => {
               setIsVideoError(true);
             }}
           />

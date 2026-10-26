@@ -52,31 +52,24 @@ export function SiteBrandingSync() {
             const preset = typeof s.wallpaper === 'string' ? s.wallpaper.trim() : '';
 
             // Priority:
-            // 1. Visitor explicit personal wallpaper (handled by hasLocalPersonalWallpaper).
-            // 2. Server admin custom image override (s.custom_wallpaper_url).
-            // 3. Server admin custom preset override (if explicitly configured and not default seed).
-            // 4. Shared public default: Streamable coding video (or admin custom video if provided).
+            // 1. Visitor explicit personal wallpaper (handled by hasLocalPersonalWallpaper above).
+            // 2. Intentional admin-configured video override (s.custom_video_wallpaper_url).
+            // 3. Shared public default: Streamable coding video.
+            // 4. Safe image/static fallback: Server-configured custom image (s.custom_wallpaper_url)
+            //    or preset (s.wallpaper) are saved as customWallpaperUrl / wallpaper so that if
+            //    video playback fails or prefers-reduced-motion is active, the safe fallback renders.
+            //    Ordinary built-in presets or unactivated images are never mistaken for overrides.
+            const targetVideoUrl =
+              videoUrl || current.customVideoWallpaperUrl || STREAMABLE_DEFAULT_VIDEO_URL;
+            updates.customVideoWallpaperUrl = targetVideoUrl;
+            updates.videoWallpaperSource = detectIframeVideoSource(targetVideoUrl);
+            updates.wallpaperType = 'video';
+
             if (imageUrl) {
               updates.customWallpaperUrl = imageUrl;
-              updates.wallpaperType = 'image';
-              if (videoUrl) {
-                updates.customVideoWallpaperUrl = videoUrl;
-                updates.videoWallpaperSource = detectIframeVideoSource(videoUrl);
-              }
-            } else if (preset && preset !== 'matrix' && preset !== 'cyber') {
+            }
+            if (preset) {
               updates.wallpaper = preset;
-              updates.wallpaperType = 'preset';
-              if (videoUrl) {
-                updates.customVideoWallpaperUrl = videoUrl;
-                updates.videoWallpaperSource = detectIframeVideoSource(videoUrl);
-              }
-            } else {
-              // No custom admin image or custom preset: shared public default Streamable coding video
-              const defaultVideoUrl =
-                videoUrl || current.customVideoWallpaperUrl || STREAMABLE_DEFAULT_VIDEO_URL;
-              updates.customVideoWallpaperUrl = defaultVideoUrl;
-              updates.wallpaperType = 'video';
-              updates.videoWallpaperSource = detectIframeVideoSource(defaultVideoUrl);
             }
 
             if (typeof s.video_wallpaper_muted === 'boolean') {
@@ -87,9 +80,6 @@ export function SiteBrandingSync() {
             }
             if (typeof s.wallpaper_opacity === 'number' && Number.isFinite(s.wallpaper_opacity)) {
               updates.wallpaperOpacity = Math.min(100, Math.max(0, Math.round(s.wallpaper_opacity)));
-            }
-            if (typeof s.wallpaper === 'string' && s.wallpaper.trim()) {
-              updates.wallpaper = s.wallpaper.trim();
             }
           }
 

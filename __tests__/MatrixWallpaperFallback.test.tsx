@@ -152,4 +152,36 @@ describe('MatrixWallpaper fallback behavior', () => {
       expect(recovered?.getAttribute('src')).toBe('https://cdn.example.com/recovered-video.mp4');
     });
   });
+
+  test('regression: video/embed failure causes safe image fallback to appear', async () => {
+    useWindowStore.getState().updateSettings({
+      wallpaper: 'matrix',
+      wallpaperType: 'video',
+      videoWallpaperSource: 'iframe',
+      customVideoWallpaperUrl: 'https://streamable.com/e/c51sit?autoplay=1&muted=1&loop=1&nocontrols=1',
+      customWallpaperUrl: 'https://imgh.in/host/lhsorq',
+    });
+
+    const { container } = render(React.createElement(MatrixWallpaper));
+
+    // Initially iframe is present
+    const iframe = container.querySelector('iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe?.getAttribute('src')).toBe(
+      'https://streamable.com/e/c51sit?autoplay=1&muted=1&loop=1&nocontrols=1'
+    );
+
+    // Trigger iframe error (e.g. offline or embed blocked)
+    act(() => {
+      fireEvent.error(iframe!);
+    });
+
+    // Iframe must be unmounted and safe fallback image rendered
+    await waitFor(() => {
+      expect(container.querySelector('iframe')).toBeNull();
+      const imageLayer = container.querySelector('div[style*="background-image"]');
+      expect(imageLayer).not.toBeNull();
+      expect((imageLayer as HTMLElement).style.backgroundImage).toContain('https://imgh.in/host/lhsorq');
+    });
+  });
 });

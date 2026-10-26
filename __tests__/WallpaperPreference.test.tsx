@@ -165,7 +165,7 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(settings.wallpaperOpacity).toBe(85);
   });
 
-  test('cloud image settings hydrate independently without erasing video fallback', async () => {
+  test('cloud image settings hydrate as safe fallback without displacing default Streamable video', async () => {
     const defaultSettings = useWindowStore.getState().settings;
     expect(defaultSettings.wallpaperUserOverride).toBe(false);
 
@@ -187,10 +187,11 @@ describe('Visitor wallpaper preference hydration', () => {
     render(React.createElement(SiteBrandingSync));
 
     await waitFor(() => {
-      expect(useWindowStore.getState().settings.wallpaperType).toBe('image');
+      expect(useWindowStore.getState().settings.customWallpaperUrl).toBe('https://cdn.example.com/cloud-wallpaper.jpg');
     });
 
     const settings = useWindowStore.getState().settings;
+    expect(settings.wallpaperType).toBe('video');
     expect(settings.customWallpaperUrl).toBe('https://cdn.example.com/cloud-wallpaper.jpg');
     expect(settings.customVideoWallpaperUrl).toBe(defaultSettings.customVideoWallpaperUrl);
     expect(settings.videoWallpaperSource).toBe(defaultSettings.videoWallpaperSource);
@@ -199,7 +200,7 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(settings.wallpaperOpacity).toBe(63);
   });
 
-  test('server-configured image wins over the Streamable video fallback', async () => {
+  test('server-configured image is retained as fallback while Streamable video is active default', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -217,16 +218,17 @@ describe('Visitor wallpaper preference hydration', () => {
     render(React.createElement(SiteBrandingSync));
 
     await waitFor(() => {
-      expect(useWindowStore.getState().settings.wallpaperType).toBe('image');
+      expect(useWindowStore.getState().settings.customWallpaperUrl).toBe('https://cdn.example.com/server-image.jpg');
     });
 
     const settings = useWindowStore.getState().settings;
+    expect(settings.wallpaperType).toBe('video');
     expect(settings.customWallpaperUrl).toBe('https://cdn.example.com/server-image.jpg');
     expect(settings.customVideoWallpaperUrl).toBe('https://streamable.com/e/server-fallback');
     expect(settings.videoWallpaperSource).toBe('iframe');
   });
 
-  test('server-configured preset wins over the Streamable video fallback', async () => {
+  test('server-configured preset is retained as fallback while Streamable video is active default', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -248,7 +250,8 @@ describe('Visitor wallpaper preference hydration', () => {
     });
 
     const settings = useWindowStore.getState().settings;
-    expect(settings.wallpaperType).toBe('preset');
+    expect(settings.wallpaperType).toBe('video');
+    expect(settings.wallpaper).toBe('forest');
     expect(settings.customVideoWallpaperUrl).toBe('https://streamable.com/e/server-fallback');
     expect(settings.videoWallpaperSource).toBe('iframe');
   });
@@ -416,5 +419,75 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(overrideSettings.wallpaper).toBe('forest');
     expect(overrideSettings.wallpaperType).toBe('preset');
     expect(overrideSettings.wallpaperUserOverride).toBe(true);
+  });
+
+  test('regression: fresh visitor with no saved wallpaper gets Streamable video even with server image and default preset', async () => {
+    localStorage.clear();
+    useWindowStore.getState().resetSettings();
+
+    // Exactly matches production Supabase: has custom_wallpaper_url image and wallpaper preset, but no custom video
+    (global.fetch as jest.Mock).mockResolvedValue(
+      jsonResponse({
+        success: true,
+        settings: {
+          brand_name: 'LivingYuji',
+          site_title: 'LivingYuji OS',
+          wallpaper: 'default',
+          custom_wallpaper_url: 'https://imgh.in/host/lhsorq',
+          custom_video_wallpaper_url: null,
+          video_wallpaper_muted: true,
+        },
+      })
+    );
+
+    render(React.createElement(SiteBrandingSync));
+    await waitFor(() => {
+      expect(useWindowStore.getState().settings.brandName).toBe('LivingYuji');
+    });
+
+    const settings = useWindowStore.getState().settings;
+    // Video MUST be selected as active desktop wallpaper
+    expect(settings.wallpaperType).toBe('video');
+    expect(settings.videoWallpaperSource).toBe('iframe');
+    expect(settings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    // Server image is preserved as safe fallback
+    expect(settings.customWallpaperUrl).toBe('https://imgh.in/host/lhsorq');
+    expect(settings.wallpaperUserOverride).toBe(false);
+  });
+
+  test('regression: visitor with explicitly saved image wallpaper retains their personal image selection', async () => {
+    localStorage.clear();
+    useWindowStore.getState().resetSettings();
+
+    // Visitor explicitly saved an image wallpaper
+    useWindowStore.getState().updateSettings({
+      wallpaperType: 'image',
+      customWallpaperUrl: 'https://cdn.example.com/personal-wallpaper.jpg',
+      wallpaperUserOverride: true,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValue(
+      jsonResponse({
+        success: true,
+        settings: {
+          brand_name: 'LivingYuji',
+          site_title: 'LivingYuji OS',
+          wallpaper: 'default',
+          custom_wallpaper_url: 'https://imgh.in/host/lhsorq',
+          custom_video_wallpaper_url: 'https://streamable.com/e/c51sit',
+        },
+      })
+    );
+
+    render(React.createElement(SiteBrandingSync));
+    await waitFor(() => {
+      expect(useWindowStore.getState().settings.brandName).toBe('LivingYuji');
+    });
+
+    const settings = useWindowStore.getState().settings;
+    // Visitor's personal image MUST remain selected
+    expect(settings.wallpaperType).toBe('image');
+    expect(settings.customWallpaperUrl).toBe('https://cdn.example.com/personal-wallpaper.jpg');
+    expect(settings.wallpaperUserOverride).toBe(true);
   });
 });

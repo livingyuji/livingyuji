@@ -222,9 +222,11 @@ export function migrateWindowStoreState(
   version: number
 ): { settings?: Partial<OSSettings> } {
   const state = persistedState as { settings?: Partial<OSSettings> };
-  // v0 stores predate explicit wallpaper tracking. Their preset/image
-  // wallpaper is the default, so it is preserved and classified below.
-  if (state.settings && version < 2) {
+  // v0..v2 stores predate or incompletely classified default public video.
+  // Preserve explicit user choices (custom image, explicit non-default preset,
+  // or local uploaded blob). When no explicit user override exists, upgrade
+  // the visitor to the shared public Streamable coding video default.
+  if (state.settings && version < 3) {
     const settings = state.settings;
     const explicitlyPersonal =
       settings.wallpaperUserOverride === true ||
@@ -232,11 +234,7 @@ export function migrateWindowStoreState(
       Boolean(settings.customVideoWallpaperUrl?.startsWith('local:')) ||
       Boolean(settings.customWallpaperUrl?.startsWith('local:')) ||
       (Boolean(settings.customWallpaperUrl) && settings.wallpaperType === 'image') ||
-      (Boolean(settings.wallpaper) && settings.wallpaper !== DEFAULT_SETTINGS.wallpaper) ||
-      Boolean(
-        settings.customVideoWallpaperUrl &&
-          settings.customVideoWallpaperUrl !== DEFAULT_SETTINGS.customVideoWallpaperUrl
-      );
+      (Boolean(settings.wallpaper) && settings.wallpaper !== 'matrix' && settings.wallpaper !== 'default');
 
     settings.wallpaperUserOverride = explicitlyPersonal;
     if (!explicitlyPersonal) {
@@ -447,7 +445,7 @@ export const useWindowStore = create<WindowStore>()(
     }),
     {
       name: 'lyos-window-store',
-      version: 2, // v2 tracks explicit visitor wallpaper preferences
+      version: 3, // v3 ensures public visitors without explicit override default to Streamable video
       partialize: (state) => {
         const settings = { ...state.settings };
         // Never serialize temporary in-memory blob: URLs to localStorage
