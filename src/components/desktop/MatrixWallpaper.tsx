@@ -1,7 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { STREAMABLE_DEFAULT_VIDEO_URL, STREAMABLE_FALLBACK_VIDEO_URL, useWindowStore } from '@/store/windowStore';
+import {
+  DEFAULT_PERMANENT_WALLPAPER_URL,
+  STREAMABLE_DEFAULT_VIDEO_URL,
+  STREAMABLE_FALLBACK_VIDEO_URL,
+  useWindowStore,
+} from '@/store/windowStore';
 import {
   loadVideoWallpaperBlob,
   getActiveVideoBlobUrl,
@@ -277,7 +282,7 @@ export const MatrixWallpaper = React.memo(function MatrixWallpaper() {
     };
   }, [settings.wallpaper]);
 
-  const customWp = resolvedImageUrl || settings.customWallpaperUrl;
+  const customWp = resolvedImageUrl || settings.customWallpaperUrl || DEFAULT_PERMANENT_WALLPAPER_URL;
   const wpMode = settings.wallpaperMode || 'cover';
 
   // Render decisions

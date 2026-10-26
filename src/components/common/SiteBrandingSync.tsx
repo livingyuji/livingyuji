@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useWindowStore, STREAMABLE_DEFAULT_VIDEO_URL } from '@/store/windowStore';
+import { useWindowStore, DEFAULT_PERMANENT_WALLPAPER_URL } from '@/store/windowStore';
 import { detectIframeVideoSource } from '@/lib/validation/urls';
 
 export function SiteBrandingSync() {
@@ -53,20 +53,22 @@ export function SiteBrandingSync() {
 
             // Priority:
             // 1. Visitor explicit personal wallpaper (handled by hasLocalPersonalWallpaper above).
-            // 2. Intentional admin-configured video override (s.custom_video_wallpaper_url).
-            // 3. Shared public default: Streamable coding video.
-            // 4. Safe image/static fallback: Server-configured custom image (s.custom_wallpaper_url)
-            //    or preset (s.wallpaper) are saved as customWallpaperUrl / wallpaper so that if
-            //    video playback fails or prefers-reduced-motion is active, the safe fallback renders.
-            //    Ordinary built-in presets or unactivated images are never mistaken for overrides.
-            const targetVideoUrl =
-              videoUrl || current.customVideoWallpaperUrl || STREAMABLE_DEFAULT_VIDEO_URL;
-            updates.customVideoWallpaperUrl = targetVideoUrl;
-            updates.videoWallpaperSource = detectIframeVideoSource(targetVideoUrl);
-            updates.wallpaperType = 'video';
-
-            if (imageUrl) {
-              updates.customWallpaperUrl = imageUrl;
+            // 2. Intentional admin-configured video override (if explicitly provided).
+            // 3. Permanent default background: Cyberpunk City image (/wallpapers/cyberpunk-city.jpg).
+            //    Legacy placeholder 'https://imgh.in/host/lhsorq' is superseded by the permanent asset.
+            if (videoUrl) {
+              updates.customVideoWallpaperUrl = videoUrl;
+              updates.videoWallpaperSource = detectIframeVideoSource(videoUrl);
+              updates.wallpaperType = 'video';
+            } else {
+              const activeImage =
+                imageUrl && imageUrl !== 'https://imgh.in/host/lhsorq'
+                  ? imageUrl
+                  : DEFAULT_PERMANENT_WALLPAPER_URL;
+              updates.customWallpaperUrl = activeImage;
+              updates.wallpaperType = 'image';
+              updates.videoWallpaperSource = null;
+              updates.customVideoWallpaperUrl = null;
             }
             if (preset) {
               updates.wallpaper = preset;

@@ -1,6 +1,11 @@
 import React from 'react';
 import { render, waitFor } from '@testing-library/react';
-import { migrateWindowStoreState, useWindowStore, STREAMABLE_DEFAULT_VIDEO_URL } from '@/store/windowStore';
+import {
+  migrateWindowStoreState,
+  useWindowStore,
+  DEFAULT_PERMANENT_WALLPAPER_URL,
+  STREAMABLE_DEFAULT_VIDEO_URL,
+} from '@/store/windowStore';
 import { SiteBrandingSync } from '@/components/common/SiteBrandingSync';
 
 function jsonResponse(body: unknown, ok = true): Response {
@@ -23,15 +28,14 @@ describe('Visitor wallpaper preference hydration', () => {
     global.fetch = originalFetch;
   });
 
-  test('new stores default to the Streamable coding video as the shared public animated background', () => {
+  test('new stores default to the permanent Cyberpunk City background image', () => {
     const settings = useWindowStore.getState().settings;
-    expect(settings.wallpaperType).toBe('video');
-    expect(settings.videoWallpaperSource).toBe('iframe');
-    expect(settings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    expect(settings.wallpaperType).toBe('image');
+    expect(settings.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
     expect(settings.wallpaperUserOverride).toBe(false);
   });
 
-  test('v0 migration upgrades an untouched legacy store to default Streamable coding video', () => {
+  test('v0 migration upgrades an untouched legacy store to default permanent background image', () => {
     const migrated = migrateWindowStoreState(
       {
         settings: {
@@ -44,9 +48,8 @@ describe('Visitor wallpaper preference hydration', () => {
       0
     );
 
-    expect(migrated.settings?.wallpaperType).toBe('video');
-    expect(migrated.settings?.videoWallpaperSource).toBe('iframe');
-    expect(migrated.settings?.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    expect(migrated.settings?.wallpaperType).toBe('image');
+    expect(migrated.settings?.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
     expect(migrated.settings?.wallpaperUserOverride).toBe(false);
   });
 
@@ -165,10 +168,7 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(settings.wallpaperOpacity).toBe(85);
   });
 
-  test('cloud image settings hydrate as safe fallback without displacing default Streamable video', async () => {
-    const defaultSettings = useWindowStore.getState().settings;
-    expect(defaultSettings.wallpaperUserOverride).toBe(false);
-
+  test('cloud image settings hydrate custom wallpaper image', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -191,16 +191,14 @@ describe('Visitor wallpaper preference hydration', () => {
     });
 
     const settings = useWindowStore.getState().settings;
-    expect(settings.wallpaperType).toBe('video');
+    expect(settings.wallpaperType).toBe('image');
     expect(settings.customWallpaperUrl).toBe('https://cdn.example.com/cloud-wallpaper.jpg');
-    expect(settings.customVideoWallpaperUrl).toBe(defaultSettings.customVideoWallpaperUrl);
-    expect(settings.videoWallpaperSource).toBe(defaultSettings.videoWallpaperSource);
     expect(settings.videoWallpaperMuted).toBe(false);
     expect(settings.wallpaperMode).toBe('tile');
     expect(settings.wallpaperOpacity).toBe(63);
   });
 
-  test('server-configured image is retained as fallback while Streamable video is active default', async () => {
+  test('server-configured image is applied for unauthenticated visitors', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -209,7 +207,7 @@ describe('Visitor wallpaper preference hydration', () => {
           site_title: 'LivingYuji OS',
           wallpaper: 'matrix',
           custom_wallpaper_url: 'https://cdn.example.com/server-image.jpg',
-          custom_video_wallpaper_url: 'https://streamable.com/e/server-fallback',
+          custom_video_wallpaper_url: null,
           video_wallpaper_muted: true,
         },
       })
@@ -222,13 +220,11 @@ describe('Visitor wallpaper preference hydration', () => {
     });
 
     const settings = useWindowStore.getState().settings;
-    expect(settings.wallpaperType).toBe('video');
+    expect(settings.wallpaperType).toBe('image');
     expect(settings.customWallpaperUrl).toBe('https://cdn.example.com/server-image.jpg');
-    expect(settings.customVideoWallpaperUrl).toBe('https://streamable.com/e/server-fallback');
-    expect(settings.videoWallpaperSource).toBe('iframe');
   });
 
-  test('server-configured preset is retained as fallback while Streamable video is active default', async () => {
+  test('server-configured video override is applied if explicitly provided', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -282,7 +278,7 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(settings.videoWallpaperSource).toBe('iframe');
   });
 
-  test('built-in Streamable fallback is retained when the server has no image or preset', async () => {
+  test('permanent Cyberpunk City background is retained when the server has no custom image or video', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -300,12 +296,12 @@ describe('Visitor wallpaper preference hydration', () => {
     render(React.createElement(SiteBrandingSync));
 
     await waitFor(() => {
-      expect(useWindowStore.getState().settings.wallpaperType).toBe('video');
+      expect(useWindowStore.getState().settings.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
     });
 
     const settings = useWindowStore.getState().settings;
-    expect(settings.customVideoWallpaperUrl).toContain('streamable.com');
-    expect(settings.videoWallpaperSource).toBe('iframe');
+    expect(settings.wallpaperType).toBe('image');
+    expect(settings.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
   });
 
   test('older schemas without wallpaper columns preserve the configured fallback', async () => {
@@ -356,9 +352,8 @@ describe('Visitor wallpaper preference hydration', () => {
     useWindowStore.getState().resetSettings();
 
     const freshSettings = useWindowStore.getState().settings;
-    expect(freshSettings.wallpaperType).toBe('video');
-    expect(freshSettings.videoWallpaperSource).toBe('iframe');
-    expect(freshSettings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    expect(freshSettings.wallpaperType).toBe('image');
+    expect(freshSettings.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
     expect(freshSettings.wallpaperUserOverride).toBe(false);
 
     // When public branding hydrates from server with default base DB row (no custom video/image)
@@ -382,9 +377,8 @@ describe('Visitor wallpaper preference hydration', () => {
     });
 
     const visitorSettings = useWindowStore.getState().settings;
-    expect(visitorSettings.wallpaperType).toBe('video');
-    expect(visitorSettings.videoWallpaperSource).toBe('iframe');
-    expect(visitorSettings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
+    expect(visitorSettings.wallpaperType).toBe('image');
+    expect(visitorSettings.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
     expect(visitorSettings.wallpaperUserOverride).toBe(false);
     unmount();
 
@@ -421,11 +415,11 @@ describe('Visitor wallpaper preference hydration', () => {
     expect(overrideSettings.wallpaperUserOverride).toBe(true);
   });
 
-  test('regression: fresh visitor with no saved wallpaper gets Streamable video even with server image and default preset', async () => {
+  test('regression: fresh visitor gets permanent Cyberpunk City background image even with default preset or legacy image', async () => {
     localStorage.clear();
     useWindowStore.getState().resetSettings();
 
-    // Exactly matches production Supabase: has custom_wallpaper_url image and wallpaper preset, but no custom video
+    // Matches production Supabase: has custom_wallpaper_url placeholder and wallpaper preset, but no custom video
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({
         success: true,
@@ -446,12 +440,8 @@ describe('Visitor wallpaper preference hydration', () => {
     });
 
     const settings = useWindowStore.getState().settings;
-    // Video MUST be selected as active desktop wallpaper
-    expect(settings.wallpaperType).toBe('video');
-    expect(settings.videoWallpaperSource).toBe('iframe');
-    expect(settings.customVideoWallpaperUrl).toBe(STREAMABLE_DEFAULT_VIDEO_URL);
-    // Server image is preserved as safe fallback
-    expect(settings.customWallpaperUrl).toBe('https://imgh.in/host/lhsorq');
+    expect(settings.wallpaperType).toBe('image');
+    expect(settings.customWallpaperUrl).toBe(DEFAULT_PERMANENT_WALLPAPER_URL);
     expect(settings.wallpaperUserOverride).toBe(false);
   });
 

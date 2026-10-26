@@ -170,6 +170,11 @@ export const APP_CONFIGS: Record<AppId, { title: string; defaultWidth: number; d
 };
 
 /**
+ * Permanent cyberpunk city desktop background image asset.
+ */
+export const DEFAULT_PERMANENT_WALLPAPER_URL = '/wallpapers/cyberpunk-city.jpg';
+
+/**
  * Default Streamable coding-video wallpaper embed URL with verified parameters
  * for muted autoplay, looping, and hidden controls per official documentation.
  */
@@ -179,9 +184,9 @@ export const STREAMABLE_DEFAULT_VIDEO_URL =
 export const STREAMABLE_FALLBACK_VIDEO_URL = STREAMABLE_DEFAULT_VIDEO_URL;
 
 const DEFAULT_SETTINGS: OSSettings = {
-  wallpaper: 'matrix',
-  wallpaperType: 'video',
-  videoWallpaperSource: 'iframe',
+  wallpaper: 'cyber',
+  wallpaperType: 'image',
+  videoWallpaperSource: null,
   theme: 'dark',
   accentColor: '#1686DC',
   reducedMotion: false,
@@ -195,8 +200,8 @@ const DEFAULT_SETTINGS: OSSettings = {
   siteTitle: 'LivingYuji OS — Windows-Inspired Web Operating System & Portfolio',
   customLogoUrl: '/avatar.png',
   customFaviconUrl: '/favicon.png',
-  customWallpaperUrl: null,
-  customVideoWallpaperUrl: STREAMABLE_DEFAULT_VIDEO_URL,
+  customWallpaperUrl: DEFAULT_PERMANENT_WALLPAPER_URL,
+  customVideoWallpaperUrl: null,
   videoWallpaperMuted: true,
   wallpaperMode: 'cover',
   wallpaperOpacity: 85,
@@ -222,11 +227,11 @@ export function migrateWindowStoreState(
   version: number
 ): { settings?: Partial<OSSettings> } {
   const state = persistedState as { settings?: Partial<OSSettings> };
-  // v0..v2 stores predate or incompletely classified default public video.
-  // Preserve explicit user choices (custom image, explicit non-default preset,
-  // or local uploaded blob). When no explicit user override exists, upgrade
-  // the visitor to the shared public Streamable coding video default.
-  if (state.settings && version < 3) {
+  // v0..v3 stores predate permanent cyberpunk city background.
+  // Preserve explicit visitor choices (custom image, explicit non-default preset,
+  // or local uploaded blob). When no explicit visitor override exists, set to the
+  // permanent background image.
+  if (state.settings && version < 4) {
     const settings = state.settings;
     const explicitlyPersonal =
       settings.wallpaperUserOverride === true ||
@@ -234,13 +239,14 @@ export function migrateWindowStoreState(
       Boolean(settings.customVideoWallpaperUrl?.startsWith('local:')) ||
       Boolean(settings.customWallpaperUrl?.startsWith('local:')) ||
       (Boolean(settings.customWallpaperUrl) && settings.wallpaperType === 'image') ||
-      (Boolean(settings.wallpaper) && settings.wallpaper !== 'matrix' && settings.wallpaper !== 'default');
+      (Boolean(settings.wallpaper) && settings.wallpaper !== 'matrix' && settings.wallpaper !== 'default' && settings.wallpaper !== 'cyber');
 
     settings.wallpaperUserOverride = explicitlyPersonal;
     if (!explicitlyPersonal) {
-      settings.wallpaperType = 'video';
-      settings.videoWallpaperSource = 'iframe';
-      settings.customVideoWallpaperUrl = DEFAULT_SETTINGS.customVideoWallpaperUrl;
+      settings.wallpaperType = 'image';
+      settings.videoWallpaperSource = null;
+      settings.customVideoWallpaperUrl = null;
+      settings.customWallpaperUrl = DEFAULT_SETTINGS.customWallpaperUrl;
     }
   }
 
@@ -445,7 +451,7 @@ export const useWindowStore = create<WindowStore>()(
     }),
     {
       name: 'lyos-window-store',
-      version: 3, // v3 ensures public visitors without explicit override default to Streamable video
+      version: 4, // v4 permanent cyberpunk city background
       partialize: (state) => {
         const settings = { ...state.settings };
         // Never serialize temporary in-memory blob: URLs to localStorage
